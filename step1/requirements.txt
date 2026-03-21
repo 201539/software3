@@ -1,0 +1,9 @@
+# ===== 运行时依赖 =====
+# 环境变量 / .env 文件加载
+python-dotenv>=1.0.0
+
+# OpenAI SDK —— 用于 TaskCompletion 指标的 LLM 评判（兼容 LiteLLM 代理）
+openai>=1.0.0
+
+# ===== 开发 / 测试依赖 =====
+pytest>=7.0.0
