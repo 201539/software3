@@ -1,24 +1,18 @@
 from __future__ import annotations
 
 import json
-import os
 from typing import List, Optional
 
 try:
-    from zai import ZhipuAiClient  # type: ignore
-except Exception:
-    ZhipuAiClient = None
+    from openai import OpenAI  # type: ignore
+except ImportError:
+    OpenAI = None  # type: ignore
 
+from config import LLM_API_KEY, LLM_BASE_URL, LLM_MODEL
+from utils.logger import get_logger
 from .base import Metric, MetricResult
 
-
-def _get_env(name: str) -> Optional[str]:
-    """读取环境变量，优先读取课程项目自定义前缀，其次兼容旧变量名。"""
-
-    prefixed = os.getenv(f"Software3_1_{name}")
-    if prefixed:
-        return prefixed
-    return os.getenv(name)
+logger = get_logger("metrics.task_completion")
 
 
 class TaskCompletion(Metric):
@@ -33,18 +27,24 @@ class TaskCompletion(Metric):
         score = matched / len(self.keywords) if self.keywords else 0.0
         return MetricResult(value=score, reason="任务完成度(规则版)", traces={"matched": matched})
 
-    def _call_llm(self, prompt: str) -> Optional[str]:
-        api_key = _get_env("LLM_API_KEY")
-        model = _get_env("LLM_MODEL") or "glm-4.7-flash"
+    def _call_llm(self, prompt: str, task_id: str = "") -> Optional[str]:
+        api_key = LLM_API_KEY
+        model = LLM_MODEL
         if not api_key:
-            print("[task_completion] 缺少 API Key", flush=True)
+            logger.warning("task_id=%s | 缺少 LLM_API_KEY，请在 .env 中配置", task_id)
             return None
-        if ZhipuAiClient is None:
-            print("[task_completion] 未安装 zai-sdk", flush=True)
+        if OpenAI is None:
+            logger.warning("task_id=%s | 未安装 openai 包，请 pip install openai", task_id)
             return None
 
+        logger.info("task_id=%s | 发送 LLM 请求，model=%s", task_id, model)
+        logger.debug("task_id=%s | LLM prompt:\n%s", task_id, prompt)
+
         try:
-            client = ZhipuAiClient(api_key=api_key, timeout=30, max_retries=1)
+            client_kwargs = {"api_key": api_key, "timeout": 30, "max_retries": 1}
+            if LLM_BASE_URL:
+                client_kwargs["base_url"] = LLM_BASE_URL
+            client = OpenAI(**client_kwargs)
             response = client.chat.completions.create(
                 model=model,
                 messages=[
@@ -53,12 +53,15 @@ class TaskCompletion(Metric):
                 ],
                 temperature=0,
             )
-            return response.choices[0].message.content
+            content = response.choices[0].message.content
+            logger.debug("task_id=%s | LLM raw response:\n%s", task_id, content)
+            return content
         except Exception as exc:
-            print(f"[task_completion] LLM 调用异常: {exc}", flush=True)
+            logger.error("task_id=%s | LLM 调用异常: %s", task_id, exc)
             return None
 
     def _llm_score(self, sample) -> MetricResult:
+        task_id = getattr(sample, "task_id", "?")
         prompt = (
             "你是严格的评测助手，请判断任务是否完成，并指出缺失要素。\n"
             "判断规则：必须同时满足期望结果中的核心要素（如查询店铺/菜品、下单、支付、订单号、配送地址/状态等）。\n"
@@ -68,8 +71,9 @@ class TaskCompletion(Metric):
             f"期望结果：{sample.ground_truth}\n"
             f"最终回复：{sample.final_answer}\n"
         )
-        raw = self._call_llm(prompt)
+        raw = self._call_llm(prompt, task_id=task_id)
         if raw is None:
+            logger.warning("task_id=%s | LLM 返回 None，fallback 到规则评分", task_id)
             return self._rule_score(sample.final_answer or "")
 
         try:
@@ -88,12 +92,17 @@ class TaskCompletion(Metric):
                 else:
                     reason = f"缺失要素：{', '.join(missing)}"
             completed = 1 if completed == 1 else 0
+            logger.info(
+                "task_id=%s | LLM 判定: completed=%d, reason=%s, missing=%s",
+                task_id, completed, reason, missing,
+            )
             return MetricResult(
                 value=float(completed),
                 reason=reason or "LLM 判别",
                 traces={"raw": raw, "missing": missing},
             )
         except Exception:
+            logger.error("task_id=%s | LLM 输出解析失败, raw=%s", task_id, raw)
             return MetricResult(value=0.0, reason="LLM 输出解析失败", traces={"raw": raw})
 
     def score(self, sample) -> MetricResult:
