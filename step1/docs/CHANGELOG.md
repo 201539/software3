@@ -4,6 +4,65 @@
 
 ---
 
+## [2026-03-23] 指标修复与 PlanQuality 重构
+
+### 1. ToolCallAccuracy 参数比较修复
+
+**修改文件**：`src/metrics/tool_call_accuracy.py`
+
+**问题**：参数比较使用直接 `==`，当 JSON 解析后类型不一致时（如 `5` vs `"5"`）会误判为不匹配。
+
+**修复**：对齐 Ragas 的 `exact_match_args` 实现，将参数值转为字符串后再比较：
+```python
+# 修复前
+if k in preds and preds[k] == v:
+# 修复后
+if k in preds and str(preds[k]) == str(v):
+```
+
+### 2. ToolCallAccuracy 非严格模式修复
+
+**修改文件**：`src/metrics/tool_call_accuracy.py`
+
+**问题**：`strict_order=False` 时，只对工具名列表做排序检查 `aligned`，但 `zip` 配对时仍使用原始未排序的列表，导致工具名无法正确配对，非严格模式形同虚设。
+
+**修复**：对齐 Ragas 的排序逻辑，新增 `_sorted_key` 函数（对应 Ragas 的 `sorted_key_for_tool_call`），非严格模式下先按工具名+参数排序再进行后续计算。
+
+### 3. PlanQuality 全面重构
+
+**修改文件**：`src/metrics/plan_quality.py`
+
+**问题**：旧实现只做三项粗粒度检查（重复工具计数、缺失工具、步骤长度差），惩罚系数过小，均值 0.95 几乎无区分度。无法检测 PDF 要求的"死循环"和"逻辑断层"。
+
+**重构内容**：基于对 27 个评估样本的实际分析，新增 5 项检测：
+
+| 检测项 | 说明 | 每项扣分 |
+| --- | --- | --- |
+| 无效工具 | 调用系统中不存在的工具（如 `get_menu`、`submit_payment`） | -0.15 |
+| 死循环 | 相邻步骤调用同一工具（错误重试模式） | -0.10 |
+| 逻辑断层 | 跳过前置依赖（如未 `search_products` 就直接 `place_order`） | -0.10 |
+| 缺失工具 | 期望工具未出现在实际调用中 | -0.10 |
+| 冗余步骤 | 实际步骤数多于期望步骤数 | -0.05 |
+
+**效果**：均值从 0.95 降至 0.91，分数范围从 0.85~1.0 拉开至 0.55~1.0，有效区分了不同质量的规划轨迹。
+
+### 4. 测试更新
+
+**修改文件**：`tests/unit/test_tool_call_accuracy.py`、`tests/unit/test_plan_quality.py`
+
+- ToolCallAccuracy：修复非严格模式测试预期值，新增类型不一致测试（共 10 个测试）
+- PlanQuality：重写测试套件，覆盖无效工具、死循环、逻辑断层等场景（共 11 个测试）
+
+### 5. 评估报告更新
+
+**修改文件**：`docs/评估报告.md`
+
+- 修正 task_completion 均值（1.0 → 0.9259）和 plan_quality 均值（0.95 → 0.9093）
+- 补充各指标与 Ragas 的对应关系
+- 新增 PlanQuality 低分样本的具体分析
+
+---
+
 ## [2026-03-21] 项目结构迁移 & 工程化增强
 
 ### 1. 目录结构重组

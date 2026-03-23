@@ -26,43 +26,103 @@ class TestPlanQuality:
 
     def test_perfect_plan(self):
         metric = PlanQuality()
-        result = metric.score(_sample(["search", "order"], ["search", "order"]))
+        result = metric.score(_sample(["search_restaurants", "search_products"], ["search_restaurants", "search_products"]))
         assert result.value == pytest.approx(1.0)
 
-    def test_repeat_penalty(self):
-        """同一工具调用超过 repeat_threshold 次 → 扣分."""
-        metric = PlanQuality(repeat_threshold=2)
-        # search 出现 3 次 → repeat_penalty=1 → -0.1
-        result = metric.score(
-            _sample(["search", "search", "search", "order"], ["search", "order"])
-        )
-        assert result.traces["repeat_penalty"] == 1
+    def test_invalid_tool(self):
+        """调用不存在的工具 → 扣分."""
+        metric = PlanQuality()
+        result = metric.score(_sample(
+            ["get_menu", "search_restaurants", "search_products"],
+            ["search_restaurants", "search_products"],
+        ))
+        assert result.traces["invalid_tools"] == ["get_menu"]
+        assert result.value < 1.0
+
+    def test_consecutive_repeat(self):
+        """相邻重复调用同一工具 → 死循环扣分."""
+        metric = PlanQuality()
+        result = metric.score(_sample(
+            ["search_restaurants", "search_restaurants", "search_products"],
+            ["search_restaurants", "search_products"],
+        ))
+        assert result.traces["consecutive_repeats"] == 1
+        assert result.value < 1.0
+
+    def test_non_consecutive_repeat_ok(self):
+        """非相邻的重复调用（如查两道菜）不应被扣死循环分."""
+        metric = PlanQuality()
+        result = metric.score(_sample(
+            ["search_restaurants", "search_products", "search_products", "place_order"],
+            ["search_restaurants", "search_products", "search_products", "place_order"],
+        ))
+        # search_products 连续出现但是合法的（查两道菜），这里会被检测为 1 次连续重复
+        # 但因为和 expected 完全一致，missing=0, redundant=0
+        assert result.traces["consecutive_repeats"] == 1
+        assert result.value == pytest.approx(0.9)
+
+    def test_dependency_violation(self):
+        """跳过前置依赖 → 逻辑断层扣分."""
+        metric = PlanQuality()
+        # place_order 在 search_products 之前出现
+        result = metric.score(_sample(
+            ["search_restaurants", "place_order", "search_products"],
+            ["search_restaurants", "search_products", "place_order"],
+        ))
+        assert result.traces["dependency_violations"] == 1
         assert result.value < 1.0
 
     def test_missing_tool(self):
         """缺少参考中的工具 → 扣分."""
         metric = PlanQuality()
-        result = metric.score(_sample(["search"], ["search", "order", "pay"]))
-        assert result.traces["missing"] == 2  # order, pay 缺失
-        assert result.value < 1.0
+        result = metric.score(_sample(
+            ["search_restaurants"],
+            ["search_restaurants", "search_products", "place_order"],
+        ))
+        assert result.traces["missing"] == 2  # search_products, place_order 缺失
 
-    def test_length_gap(self):
-        """步骤数差异 → 扣分."""
+    def test_redundant_steps(self):
+        """实际步骤多于期望 → 冗余扣分."""
         metric = PlanQuality()
-        result = metric.score(_sample(["search"], ["search", "order", "pay"]))
-        assert result.traces["length_gap"] == 2
+        result = metric.score(_sample(
+            ["search_restaurants", "search_products", "place_order", "pay_order", "check_order_status"],
+            ["search_restaurants", "search_products", "place_order"],
+        ))
+        assert result.traces["redundant"] == 2
 
     def test_score_floor_zero(self):
         """扣分过多时分数不低于 0."""
-        metric = PlanQuality(repeat_threshold=1)
-        # 大量重复 + 缺失 → 扣分超过 1.0
-        pred = ["a"] * 20
-        ref = ["b", "c", "d", "e", "f", "g", "h", "i", "j", "k"]
+        metric = PlanQuality()
+        pred = ["foo"] * 10
+        ref = ["search_restaurants", "search_products", "place_order"]
         result = metric.score(_sample(pred, ref))
         assert result.value == pytest.approx(0.0)
 
     def test_both_empty(self):
         metric = PlanQuality()
         result = metric.score(_sample([], []))
-        # no penalty → 1.0
         assert result.value == pytest.approx(1.0)
+
+    def test_dead_loop_with_invalid_tool(self):
+        """样本 #23 模式：先调无效工具再正常流程."""
+        metric = PlanQuality()
+        result = metric.score(_sample(
+            ["get_menu", "search_restaurants", "search_products", "place_order", "pay_order"],
+            ["search_restaurants", "search_products", "place_order", "pay_order"],
+        ))
+        assert result.traces["invalid_tools"] == ["get_menu"]
+        assert result.traces["redundant"] == 1
+        # -0.15 (invalid) -0.05 (redundant) = 0.8
+        assert result.value == pytest.approx(0.8)
+
+    def test_sample25_pattern(self):
+        """样本 #25 模式：3 次错误-重试，步骤翻倍."""
+        metric = PlanQuality()
+        result = metric.score(_sample(
+            ["search_restaurants", "search_restaurants", "search_products", "search_products", "place_order", "place_order"],
+            ["search_restaurants", "search_products", "place_order"],
+        ))
+        assert result.traces["consecutive_repeats"] == 3
+        assert result.traces["redundant"] == 3
+        # -0.1*3 (repeats) -0.05*3 (redundant) = 1.0 - 0.3 - 0.15 = 0.55
+        assert result.value == pytest.approx(0.55)
