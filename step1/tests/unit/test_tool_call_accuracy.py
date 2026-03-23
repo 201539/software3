@@ -66,9 +66,8 @@ class TestToolCallAccuracy:
         ref = [_step("search", {"q": "p"}), _step("order", {"id": "1"})]
         metric = ToolCallAccuracy(strict_order=False)
         result = metric.score(_sample(pred, ref))
-        # aligned=1 (sorted 相等), 但 zip 配对后工具名不同 → arg 分为 0
-        # 实际: pred[0]=order vs ref[0]=search → 不匹配; pred[1]=search vs ref[1]=order → 不匹配
-        assert result.value == pytest.approx(0.0)
+        # 非严格模式：排序后正确配对 order↔order, search↔search → 1.0
+        assert result.value == pytest.approx(1.0)
 
     def test_partial_arg_match(self):
         pred = [_step("search", {"q": "pizza", "city": "nj"})]
@@ -85,3 +84,11 @@ class TestToolCallAccuracy:
         result = metric.score(_sample(pred, ref))
         # aligned: pred_seq != ref_seq (长度不同) → 0
         assert result.value == pytest.approx(0.0)
+
+    def test_type_mismatch_args(self):
+        """参数值类型不同但字符串相等时应视为匹配（与 Ragas str() 对齐）。"""
+        pred = [_step("search", {"count": "5", "name": "pizza"})]
+        ref = [_step("search", {"count": 5, "name": "pizza"})]
+        metric = ToolCallAccuracy(strict_order=True)
+        result = metric.score(_sample(pred, ref))
+        assert result.value == pytest.approx(1.0)

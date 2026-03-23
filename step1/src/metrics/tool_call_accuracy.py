@@ -1,8 +1,17 @@
 from __future__ import annotations
 
-from typing import Dict, List
+from typing import Any, Dict, List, Tuple
 
 from .base import Metric, MetricResult
+
+
+def _sorted_key(step) -> Tuple[str, ...]:
+    """生成排序键，与 Ragas 的 sorted_key_for_tool_call 对齐。"""
+    key_list = [step.tool_call]
+    for name in sorted(step.input):
+        key_list.append(name)
+        key_list.append(str(step.input[name]))
+    return tuple(key_list)
 
 
 class ToolCallAccuracy(Metric):
@@ -18,7 +27,7 @@ class ToolCallAccuracy(Metric):
             return 0.0
         matched = 0
         for k, v in refs.items():
-            if k in preds and preds[k] == v:
+            if k in preds and str(preds[k]) == str(v):
                 matched += 1
         return matched / len(refs)
 
@@ -28,8 +37,8 @@ class ToolCallAccuracy(Metric):
         return sorted(pred_seq) == sorted(ref_seq)
 
     def score(self, sample) -> MetricResult:
-        preds = sample.steps
-        refs = sample.expected_steps
+        preds = list(sample.steps)
+        refs = list(sample.expected_steps)
 
         if not preds and not refs:
             return MetricResult(1.0, reason="pred/ref 都为空")
@@ -37,6 +46,11 @@ class ToolCallAccuracy(Metric):
             return MetricResult(0.0, reason="预测为空")
         if preds and not refs:
             return MetricResult(0.0, reason="参考为空")
+
+        # 非严格模式：先排序再配对（与 Ragas 一致）
+        if not self.strict_order:
+            preds = sorted(preds, key=_sorted_key)
+            refs = sorted(refs, key=_sorted_key)
 
         pred_seq = [s.tool_call for s in preds]
         ref_seq = [s.tool_call for s in refs]
