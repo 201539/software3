@@ -6,3 +6,13 @@ __pycache__/
 .pytest_cache/
 
 .venv
+
+ragas/
+
+# local experimental folders
+pwpython/
+step2/文档/
+# env files
+.env
+*.env
+**/.env

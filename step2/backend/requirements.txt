@@ -1,0 +1,13 @@
+fastapi
+uvicorn[standard]
+sqlalchemy
+pymysql
+alembic
+pydantic
+pydantic-settings
+python-dotenv
+celery
+redis
+pytest
+httpx
+beautifulsoup4
