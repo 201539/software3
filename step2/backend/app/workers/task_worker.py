@@ -15,11 +15,11 @@ from sqlalchemy.orm import Session
 
 from app.core.database import SessionLocal
 from app.core.error_codes import RUN_NOT_FOUND, TASK_NOT_FOUND
-from app.models.run import Run
 from app.repositories.run_repository import RunRepository
 from app.repositories.task_repository import TaskRepository
-from app.services.trace_service import TraceService
-from app.services.web_health_check_service import WebHealthCheckService
+from app.services.scenario_regression.scenario_regression_service import ScenarioRegressionService
+from app.services.traces.trace_service import TraceService
+from app.services.web_health_check.web_health_check_service import WebHealthCheckService
 from app.workers.celery_app import celery_app
 
 
@@ -75,24 +75,28 @@ def _execute_web_health_check(db: Session, run_id: str, input_payload: dict[str,
 
     start = perf_counter()
     result = WebHealthCheckService.execute(input_payload)
+    duration_ms = int((perf_counter() - start) * 1000)
+    success = result.get("task_status") == "success"
+
     TraceService.add_tool_call(
         db,
         run_id=run_id,
         tool_name="web_health_check_http",
         input_payload=input_payload,
         output_payload=result,
-        success=result.get("task_status") == "success",
-        error_type=None if result.get("task_status") == "success" else "health_check_failed",
-        duration_ms=int((perf_counter() - start) * 1000),
+        success=success,
+        error_type=None if success else "health_check_failed",
+        duration_ms=duration_ms,
     )
 
+    summary = result.get("summary", "")
     TraceService.add_step(
         db,
         run_id=run_id,
         step_index=2,
         phase="observe",
         decision="汇总页面可达性与元素检查结果",
-        observation=result.get("summary", ""),
+        observation=summary,
     )
 
     TraceService.add_step(
@@ -101,14 +105,14 @@ def _execute_web_health_check(db: Session, run_id: str, input_payload: dict[str,
         step_index=3,
         phase="deliver",
         decision="输出结构化巡检结果",
-        observation=result.get("summary", ""),
+        observation=summary,
     )
 
     return result
 
 
 @celery_app.task(bind=True, max_retries=2)
-def execute_run(self, run_id: str):
+def execute_run(_self, run_id: str):
     """执行 run 主流程。"""
     db: Session = SessionLocal()
     try:
@@ -126,18 +130,21 @@ def execute_run(self, run_id: str):
 
         if task.task_type == "web_health_check":
             result = _execute_web_health_check(db, run_id=run.id, input_payload=task.input_payload)
+        elif task.task_type == "scenario_regression":
+            result = ScenarioRegressionService.execute(db, run_id=run.id, input_payload=task.input_payload)
         else:
             result = _execute_mock_pipeline(db, run_id=run.id)
 
         run.status = "success" if result.get("task_status") == "success" else "failed"
         run.end_time = datetime.now(timezone.utc)
         run.final_summary = json.dumps(result, ensure_ascii=False)
+        run.result_json = result
         RunRepository.save(db, run)
 
         event_name = "run.succeeded" if run.status == "success" else "run.failed"
         return {
             "ok": run.status == "success",
-            "event": _ws_event(event_name, run.id, run.trace_id, {"summary": result.get("summary", "")} ),
+            "event": _ws_event(event_name, run.id, run.trace_id, {"summary": result.get("summary", "")}),
         }
     except Exception as exc:
         run = RunRepository.get_by_id(db, run_id)

@@ -13,6 +13,8 @@ from urllib.parse import urljoin
 import httpx
 from bs4 import BeautifulSoup
 
+from app.services.llm.doubao_provider import DoubaoProvider
+
 
 @dataclass
 class PageCheckResult:
@@ -108,9 +110,20 @@ class WebHealthCheckService:
         else:
             summary = "存在页面不可访问或关键元素缺失"
 
-        return {
+        result = {
             "task_status": task_status,
             "page_results": [p.__dict__ for p in page_results],
             "missing_selectors": missing_selectors_map,
             "summary": summary,
         }
+
+        use_llm = bool(input_payload.get("use_llm", False))
+        if use_llm:
+            llm_result = DoubaoProvider().summarize_web_health_check(result)
+            result["llm_summary"] = llm_result.get("summary")
+            result["llm_error"] = llm_result.get("error")
+            result["llm_enabled"] = llm_result.get("enabled", False)
+            if llm_result.get("summary"):
+                result["summary"] = llm_result["summary"]
+
+        return result

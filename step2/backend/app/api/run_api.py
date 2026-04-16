@@ -10,9 +10,9 @@ from app.core.database import get_db
 from app.core.error_codes import RUN_NOT_FOUND, TASK_NOT_FOUND
 from app.core.exceptions import AppException
 from app.schemas.common import ApiResponse, success_response
-from app.schemas.run import RunStartOut, RunSummaryOut, StepTraceOut, ToolCallOut
-from app.services.run_service import RunService
-from app.services.task_service import TaskService
+from app.schemas.run import RunResultOut, RunStartOut, RunSummaryOut, StepTraceOut, ToolCallOut
+from app.services.runs.run_service import RunService
+from app.services.tasks.task_service import TaskService
 from app.workers.task_worker import execute_run
 
 router = APIRouter(tags=["runs"])
@@ -57,6 +57,23 @@ def get_run(run_id: str, request: Request, db: Session = Depends(get_db)):
         start_time=run.start_time,
         end_time=run.end_time,
         final_summary=run.final_summary,
+    )
+    return success_response(data, request_id=_request_id(request))
+
+
+@router.get("/api/runs/{run_id}/result", response_model=ApiResponse[RunResultOut])
+def get_run_result(run_id: str, request: Request, db: Session = Depends(get_db)):
+    """查询结构化运行结果。"""
+    run = RunService.get_run(db, run_id)
+    if not run:
+        raise AppException(code=RUN_NOT_FOUND, message="运行实例不存在", status_code=404)
+
+    data = RunResultOut(
+        run_id=run.id,
+        task_id=run.task_id,
+        trace_id=run.trace_id,
+        status=run.status,
+        result_json=run.result_json,
     )
     return success_response(data, request_id=_request_id(request))
 

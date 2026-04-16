@@ -31,6 +31,16 @@ class RunSummaryOut(BaseModel):
     final_summary: str | None
 
 
+class RunResultOut(BaseModel):
+    """运行结果模型（结构化）。"""
+
+    run_id: str
+    task_id: str
+    trace_id: str
+    status: RunStatus
+    result_json: dict[str, Any] | None
+
+
 class StepTraceOut(BaseModel):
     """步骤轨迹模型。"""
 

@@ -6,6 +6,7 @@
 
 from functools import lru_cache
 
+from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -15,7 +16,7 @@ class Settings(BaseSettings):
     所有字段都可通过环境变量覆盖，字段名使用小写下划线风格。
     """
 
-    model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8", extra="ignore")
+    model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8", extra="ignore", populate_by_name=True)
 
     # 应用基础配置
     app_env: str = "dev"
@@ -36,6 +37,16 @@ class Settings(BaseSettings):
     # Celery 配置
     celery_broker_url: str = "redis://127.0.0.1:6379/0"
     celery_result_backend: str = "redis://127.0.0.1:6379/1"
+
+    # 豆包（LLM）配置
+    # 说明：
+    # - 默认 use_llm=False，不会影响现有任务流程；
+    # - 接入后可按任务开关调用 LLM 做结果总结与建议生成。
+    llm_use_doubao: bool = Field(default=False, alias="LLM_USE_DOUBAO")
+    llm_doubao_base_url: str = Field(default="https://ark.cn-beijing.volces.com/api/v3", alias="LLM_DOUBAO_BASE_URL")
+    llm_doubao_api_key: str = Field(default="", alias="LLM_DOUBAO_API_KEY")
+    llm_doubao_model: str = Field(default="", alias="LLM_DOUBAO_MODEL")
+    llm_request_timeout_ms: int = Field(default=20000, alias="LLM_REQUEST_TIMEOUT_MS")
 
     @property
     def sqlalchemy_database_uri(self) -> str:

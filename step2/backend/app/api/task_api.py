@@ -17,7 +17,7 @@ from app.core.error_codes import TASK_NOT_FOUND
 from app.core.exceptions import AppException
 from app.schemas.common import ApiResponse, PageResponse, build_page_response, success_response
 from app.schemas.task import TaskCreate, TaskDetail, TaskOut
-from app.services.task_service import TaskService
+from app.services.tasks.task_service import TaskService
 
 router = APIRouter(prefix="/api/tasks", tags=["tasks"])
 

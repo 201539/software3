@@ -1,3 +1,5 @@
+"""轨迹服务。"""
+
 from datetime import datetime, timezone
 
 from sqlalchemy.orm import Session
