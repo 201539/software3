@@ -1,0 +1,18 @@
+{
+  "name": "ai-coding-agent-web-mvp",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "node --experimental-strip-types server.ts",
+    "start": "node --experimental-strip-types server.ts",
+    "build:web": "tsc -p apps/web/tsconfig.json",
+    "dev:web": "tsc -w -p apps/web/tsconfig.json",
+    "lint": "node --check server.ts && node --check apps/runtime/server.ts && node --check apps/web/app.js",
+    "typecheck": "tsc -p tsconfig.json --noEmit"
+  },
+  "devDependencies": {
+    "@types/node": "^25.6.0",
+    "typescript": "^6.0.3"
+  }
+}

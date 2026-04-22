@@ -1,0 +1,75 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>AI Coding Agent Web MVP</title>
+    <link rel="stylesheet" href="/styles.css" />
+  </head>
+  <body>
+    <div class="app-shell">
+      <header class="topbar">
+        <div>
+          <p class="eyebrow">Agent First Workspace</p>
+          <h1>AI Coding Agent Web MVP</h1>
+        </div>
+        <div class="status-pill">运行中 · Runtime + Web</div>
+      </header>
+
+      <main id="workspaceLayout" class="workspace-layout">
+        <section class="panel chat-panel resizable-panel" data-panel="chat">
+          <div class="panel-header">
+            <h2>对话</h2>
+            <button id="refreshBtn" type="button">刷新工作区</button>
+          </div>
+          <div id="chatLog" class="chat-log"></div>
+          <form id="chatForm" class="chat-form">
+            <textarea id="promptInput" placeholder="输入你的需求，例如：生成一个登录页并补充接口说明"></textarea>
+            <button type="submit">发送给 Agent</button>
+          </form>
+        </section>
+
+        <div class="panel-resizer" data-resizer="chat-editor" aria-hidden="true"></div>
+
+        <section class="panel editor-panel resizable-panel" data-panel="editor">
+          <div class="panel-header">
+            <h2>编辑器</h2>
+            <span>当前文件</span>
+          </div>
+          <textarea id="editor" spellcheck="false"></textarea>
+        </section>
+
+        <div class="panel-resizer" data-resizer="editor-tree" aria-hidden="true"></div>
+
+        <aside class="panel sidebar resizable-panel" data-panel="tree">
+          <div class="panel-header tree-header">
+            <div class="tree-header-title">
+              <h2>工作区文件树</h2>
+              <span id="currentFile">未打开文件</span>
+            </div>
+            <div class="tree-header-actions">
+              <div class="new-menu-wrap">
+                <button id="newItemBtn" type="button" class="ghost-button">新建</button>
+                <div id="newItemMenu" class="new-item-menu" role="menu" aria-hidden="true">
+                  <button type="button" data-kind="file" role="menuitem">新建文件</button>
+                  <button type="button" data-kind="folder" role="menuitem">新建文件夹</button>
+                </div>
+              </div>
+            </div>
+          </div>
+          <div id="fileTree" class="file-tree"></div>
+        </aside>
+      </main>
+
+      <section class="panel log-panel">
+        <div class="panel-header">
+          <h2>Agent 执行摘要</h2>
+          <span>计划 / 状态 / 结果</span>
+        </div>
+        <pre id="summary" class="summary-box"></pre>
+      </section>
+    </div>
+
+    <script type="module" src="/app.js"></script>
+  </body>
+</html>
