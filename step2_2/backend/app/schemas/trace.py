@@ -3,10 +3,7 @@ from datetime import datetime
 from pydantic import BaseModel, ConfigDict
 
 
-class TraceResponse(BaseModel):
-    model_config = ConfigDict(from_attributes=True)
-
-    id: int
+class TraceCreate(BaseModel):
     run_id: int
     sample_id: int | None = None
     step_index: int
@@ -15,14 +12,16 @@ class TraceResponse(BaseModel):
     observation: str | None = None
     state_snapshot: dict | None = None
     tool_calls: dict | None = None
-    created_at: datetime
-    updated_at: datetime
 
 
-class ToolCallLogResponse(BaseModel):
+class TraceResponse(TraceCreate):
     model_config = ConfigDict(from_attributes=True)
 
     id: int
+    created_at: datetime
+
+
+class ToolCallLogCreate(BaseModel):
     run_id: int
     sample_id: int | None = None
     tool_name: str
@@ -31,5 +30,10 @@ class ToolCallLogResponse(BaseModel):
     success: bool
     error_type: str | None = None
     duration_ms: int
+
+
+class ToolCallLogResponse(ToolCallLogCreate):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: int
     created_at: datetime
-    updated_at: datetime
