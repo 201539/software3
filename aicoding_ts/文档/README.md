@@ -62,6 +62,9 @@ repo/
 ---
 
 ## 运行方式
+运行命令：
+cd aicoding_ts
+npm run dev
 
 > 这里是 MVP 级项目，具体启动命令以当前仓库的脚本配置为准。
 
