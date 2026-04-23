@@ -1,6 +1,4 @@
-type LlmClient = {
-  createMessage: (messages: unknown[], options: Record<string, unknown>) => Promise<any>;
-};
+import type { LlmClient } from '../llm-client/index.ts';
 
 type ToolGateway = {
   readFile: (path: string) => unknown;
@@ -94,14 +92,10 @@ export function createExecutor(toolGateway: ToolGateway) {
         ],
         tool_choice: 'auto',
         parallel_tool_calls: true,
-        thinking: { type: 'enabled' },
-        reasoning_effort: 'medium',
-        temperature: 0.2,
-        top_p: 0.7,
-      });
+      }) as { choices?: Array<{ message?: unknown; delta?: unknown }> };
 
       const choice = result?.choices?.[0] ?? {};
-      const content = extractTextFromMessage(choice.message);
+      const content = extractTextFromMessage((choice as any).message);
       const toolCalls = normalizeToolCalls(choice);
 
       if (onChunk && content) onChunk(content);

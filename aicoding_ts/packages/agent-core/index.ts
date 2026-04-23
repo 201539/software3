@@ -1,4 +1,5 @@
 import { createSuccessResponse } from '../shared/index.ts';
+import type { LlmClient } from '../llm-client/index.ts';
 import { createPlanner } from './planner.ts';
 import { createExecutor } from './executor.ts';
 import { createReviewer } from './reviewer.ts';
@@ -28,11 +29,6 @@ type ToolGateway = {
   writeFile: (path: string, content: string) => unknown;
   runCommand: (command: string) => unknown;
   listWorkspace: () => unknown[];
-};
-
-type LlmClient = {
-  model: string;
-  createMessage: (messages: unknown[], options?: Record<string, unknown>) => Promise<unknown>;
 };
 
 type ExecutorResult = {
@@ -93,7 +89,7 @@ function recordPhase(taskState: TaskState, phase: string, note = '') {
   taskState.phases.push({ phase, note, at: new Date().toISOString() });
 }
 
-export function createAgentCore(contextBuilder: { buildForPrompt: (prompt: string, selectedFile?: string | null) => Context }, toolGateway: ToolGateway, llmClient: LlmClient | null = null) {
+export function createAgentCore(contextBuilder: { buildForPrompt: (prompt: string, selectedFile?: string | null) => Context }, toolGateway: ToolGateway, llmClient: LlmClient) {
   const planner = createPlanner();
   const executor = createExecutor(toolGateway);
   const reviewer = createReviewer();
@@ -106,7 +102,7 @@ export function createAgentCore(contextBuilder: { buildForPrompt: (prompt: strin
       const plan = planner.plan(context);
       recordPhase(taskState, 'planning', '构建上下文并分析需求');
 
-      if (!llmClient) {
+      if (llmClient.model === 'mock') {
         const fallback = '理解需求；构建上下文；生成/修改文件；执行命令验证；回显结果。';
         recordPhase(taskState, 'execution', 'mock 模式直接返回结果');
         const review = reviewer.review({ content: fallback, toolResults: [] });
