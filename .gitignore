@@ -16,3 +16,6 @@ step2/文档/
 .env
 *.env
 **/.env
+
+# personal files
+.DS_Store

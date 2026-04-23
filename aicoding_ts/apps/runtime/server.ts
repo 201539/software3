@@ -3,7 +3,7 @@ import { readFile } from 'node:fs/promises';
 import { extname, join } from 'node:path';
 import { createAgentCore } from '../../packages/agent-core/index.ts';
 import { createContextBuilder } from '../../packages/context-builder/index.ts';
-import { createDoubaoClient } from '../../packages/llm-client/index.ts';
+import { createLlmClient } from '../../packages/llm-client/index.ts';
 import { createToolGateway } from '../../packages/tool-gateway/index.ts';
 import { createWorkspaceManager } from '../../packages/workspace-manager/index.ts';
 
@@ -74,7 +74,7 @@ async function parseBody<T extends RequestContext>(req: IncomingMessage): Promis
 const workspaceManager: WorkspaceManager = createWorkspaceManager();
 const toolGateway: ToolGateway = createToolGateway(workspaceManager);
 const contextBuilder = createContextBuilder(toolGateway);
-const llmClient = process.env.DOUBAO_API_KEY && process.env.DOUBAO_MODEL ? createDoubaoClient() : null;
+const llmClient = createLlmClient();
 const agentCore: AgentCore = createAgentCore(contextBuilder, toolGateway, llmClient);
 
 await workspaceManager.loadFromDisk();
@@ -109,8 +109,8 @@ export function startRuntimeServer() {
     if (url.pathname === '/api/meta') {
       sendJson(res, 200, {
         appName: 'AI Coding Agent Web MVP',
-        llmEnabled: Boolean(llmClient),
-        provider: llmClient ? 'doubao-ark' : 'mock',
+        llmEnabled: llmClient.model !== 'mock',
+        provider: llmClient.model === 'mock' ? 'mock' : (process.env.LLM_PROVIDER || 'openai-compat'),
       });
       return;
     }
