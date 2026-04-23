@@ -29,6 +29,8 @@ type ToolGateway = {
   writeFile: (path: string, content: string) => unknown;
   runCommand: (command: string) => unknown;
   listWorkspace: () => unknown[];
+  searchInWorkspace: (query: string, path?: string) => unknown[];
+  patchFile: (path: string, patch: string) => unknown;
 };
 
 type ExecutorResult = {
@@ -47,6 +49,8 @@ function buildMessages(context: Context, phase: string, taskState: TaskState) {
         '你必须优先使用 tools 完成文件读取、写入和命令执行。',
         '不要编造工具执行结果。',
         '当任务需要操作文件或命令时，优先调用工具。',
+        '如果是修改已有文件，优先使用 patch_file 做局部修改；只有新建文件、整文件重写或 patch 失败时才使用 write_file。',
+        '如果需要先定位目标，可先调用 search_in_workspace。',
         '当任务完成时，用简洁中文总结。',
         `当前阶段：${phase}`,
         `上下文预算：最多包含 ${context.contextBudget?.includedFiles?.length ?? 0} 个文件，最大字符数 ${context.contextBudget?.maxChars ?? 0}。`,

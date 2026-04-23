@@ -3,7 +3,9 @@ workspaces/
 
 node_modules/
 
-
 # personal files
 .DS_Store
 mydocs
+
+todo/
+测试/

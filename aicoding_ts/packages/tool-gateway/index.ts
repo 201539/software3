@@ -1,4 +1,4 @@
-import { execFile } from 'node:child_process';
+import { execFile } from 'child_process';
 import type { TreeNode, WorkspaceFile } from '../workspace-manager/index.ts';
 
 type WorkspaceManager = {
@@ -7,6 +7,8 @@ type WorkspaceManager = {
   updateFile: (path: string, content: string) => Promise<unknown>;
   listTree: () => TreeNode[];
   listFiles: () => WorkspaceFile[];
+  searchInWorkspace: (query: string, path?: string) => unknown[];
+  patchFile: (path: string, patch: string) => Promise<unknown> | unknown;
 };
 
 function splitCommand(command: string): string[] {
@@ -24,6 +26,12 @@ export function createToolGateway(workspaceManager: WorkspaceManager) {
     },
     listWorkspace(): WorkspaceFile[] {
       return workspaceManager.listFiles();
+    },
+    searchInWorkspace(query: string, path?: string) {
+      return workspaceManager.searchInWorkspace(query, path);
+    },
+    patchFile(path: string, patch: string) {
+      return workspaceManager.patchFile(path, patch);
     },
     async runCommand(command: string) {
       return new Promise((resolve) => {

@@ -5,6 +5,8 @@ type ToolGateway = {
   writeFile: (path: string, content: string) => unknown;
   runCommand: (command: string) => unknown;
   listWorkspace: () => unknown;
+  searchInWorkspace: (query: string, path?: string) => unknown;
+  patchFile: (path: string, patch: string) => unknown;
 };
 
 function extractTextFromMessage(message: any): string {
@@ -36,6 +38,8 @@ export function createExecutor(toolGateway: ToolGateway) {
     write_file: ({ path, content }) => toolGateway.writeFile(path, content),
     run_command: ({ command }) => toolGateway.runCommand(command),
     list_workspace: () => toolGateway.listWorkspace(),
+    search_in_workspace: ({ query, path }) => toolGateway.searchInWorkspace(query, path),
+    patch_file: ({ path, patch }) => toolGateway.patchFile(path, patch),
   };
 
   return {
@@ -64,6 +68,32 @@ export function createExecutor(toolGateway: ToolGateway) {
                 type: 'object',
                 properties: { path: { type: 'string' }, content: { type: 'string' } },
                 required: ['path', 'content'],
+                additionalProperties: false,
+              },
+            },
+          },
+          {
+            type: 'function',
+            function: {
+              name: 'patch_file',
+              description: '根据局部补丁修改工作区中的文件',
+              parameters: {
+                type: 'object',
+                properties: { path: { type: 'string' }, patch: { type: 'string' } },
+                required: ['path', 'patch'],
+                additionalProperties: false,
+              },
+            },
+          },
+          {
+            type: 'function',
+            function: {
+              name: 'search_in_workspace',
+              description: '在工作区中搜索文本或代码片段',
+              parameters: {
+                type: 'object',
+                properties: { query: { type: 'string' }, path: { type: 'string' } },
+                required: ['query'],
                 additionalProperties: false,
               },
             },
