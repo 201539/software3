@@ -55,7 +55,7 @@ class DatasetManager:
             reference_context=payload.reference_context,
             ground_truth=payload.ground_truth,
             sample_type=payload.sample_type,
-            metadata=payload.metadata,
+            sample_metadata=payload.sample_metadata,
         )
         return self.dataset_repository.create_sample(sample)
 

@@ -16,6 +16,8 @@ step2/文档/
 .env
 *.env
 **/.env
+step2_2/backend/.env
+step2_2/运行指令.md
 
 # personal files
 .DS_Store

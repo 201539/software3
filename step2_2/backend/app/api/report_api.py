@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 
 from app.core.database import get_db
@@ -29,3 +29,8 @@ def get_report(report_id: int, manager: ReportManager = Depends(get_report_manag
 @router.post("/evaluation-reports", response_model=ReportResponse)
 def create_report(payload: ReportCreate, manager: ReportManager = Depends(get_report_manager)):
     return manager.create_report(payload)
+
+
+@router.post("/evaluation-runs/{run_id}/export", response_model=ReportResponse)
+def export_report(run_id: int, manager: ReportManager = Depends(get_report_manager)):
+    return manager.export_report(run_id)

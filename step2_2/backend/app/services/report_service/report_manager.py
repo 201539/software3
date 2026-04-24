@@ -22,3 +22,13 @@ class ReportManager:
             report_format=payload.report_format,
         )
         return self.report_repository.create(report)
+
+    def export_report(self, run_id: int) -> EvaluationReport:
+        report = EvaluationReport(
+            run_id=run_id,
+            report_title="AI Coding Agent 评测报告",
+            report_summary="评测报告已导出",
+            report_path=f"/reports/run_{run_id}.pdf",
+            report_format="pdf",
+        )
+        return self.report_repository.create(report)

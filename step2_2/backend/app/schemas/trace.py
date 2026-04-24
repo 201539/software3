@@ -3,6 +3,12 @@ from datetime import datetime
 from pydantic import BaseModel, ConfigDict
 
 
+class ToolCallBrief(BaseModel):
+    tool_name: str
+    success: bool
+    duration_ms: int
+
+
 class TraceCreate(BaseModel):
     run_id: int
     sample_id: int | None = None
@@ -11,7 +17,7 @@ class TraceCreate(BaseModel):
     decision: str | None = None
     observation: str | None = None
     state_snapshot: dict | None = None
-    tool_calls: dict | None = None
+    tool_calls: list[ToolCallBrief] | None = None
 
 
 class TraceResponse(TraceCreate):

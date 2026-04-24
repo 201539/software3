@@ -1,4 +1,4 @@
-from sqlalchemy import BigInteger, Boolean, JSON, String, Text
+from sqlalchemy import BigInteger, Boolean, JSON, Numeric, String, Text
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.models.base import Base, TimestampMixin
@@ -37,6 +37,6 @@ class MetricResult(TimestampMixin, Base):
     run_id: Mapped[int] = mapped_column(BigInteger, nullable=False)
     sample_id: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
     metric_id: Mapped[int] = mapped_column(BigInteger, nullable=False)
-    metric_value: Mapped[float | None] = mapped_column(nullable=True)
+    metric_value: Mapped[float | None] = mapped_column(Numeric(18, 6), nullable=True)
     metric_text: Mapped[str | None] = mapped_column(Text, nullable=True)
     metric_detail: Mapped[dict | None] = mapped_column(JSON, nullable=True)
