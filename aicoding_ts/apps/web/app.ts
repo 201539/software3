@@ -753,13 +753,12 @@ async function streamChat(prompt: string) {
           updateAssistant((assistantMessage.textContent || '') + event.chunk);
         } else if (event.type === 'tool') {
           appendToolDetail(`${event.summary || '工具调用结果'}\n\n${event.detail || ''}`);
+          if (event.tool === 'write_file') {
+            sawWriteFileSuccess = true;
+            scheduleWorkspaceRefresh(300);
+          }
         } else if (event.type === 'result') {
           finalResult = event.result as PreviewResult;
-          const toolResults = finalResult?.toolResults ?? finalResult?.data?.toolResults ?? [];
-          sawWriteFileSuccess = toolResults.some((item) => item?.name === 'write_file' && item?.result?.ok);
-          if (sawWriteFileSuccess) {
-            scheduleWorkspaceRefresh(100);
-          }
           setAgentStatus('idle');
         } else if (event.type === 'error') {
           updateAssistant(`出错了：${event.message}`);
@@ -788,10 +787,6 @@ async function streamChat(prompt: string) {
         continue;
       }
     }
-  }
-
-  if (sawWriteFileSuccess) {
-    scheduleWorkspaceRefresh(0);
   }
 
   return finalResult;

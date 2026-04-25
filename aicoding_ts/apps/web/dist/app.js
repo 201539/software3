@@ -671,14 +671,13 @@ async function streamChat(prompt) {
                 }
                 else if (event.type === 'tool') {
                     appendToolDetail(`${event.summary || '工具调用结果'}\n\n${event.detail || ''}`);
+                    if (event.tool === 'write_file') {
+                        sawWriteFileSuccess = true;
+                        scheduleWorkspaceRefresh(300);
+                    }
                 }
                 else if (event.type === 'result') {
                     finalResult = event.result;
-                    const toolResults = finalResult?.toolResults ?? finalResult?.data?.toolResults ?? [];
-                    sawWriteFileSuccess = toolResults.some((item) => item?.name === 'write_file' && item?.result?.ok);
-                    if (sawWriteFileSuccess) {
-                        scheduleWorkspaceRefresh(100);
-                    }
                     setAgentStatus('idle');
                 }
                 else if (event.type === 'error') {
@@ -712,9 +711,6 @@ async function streamChat(prompt) {
                 continue;
             }
         }
-    }
-    if (sawWriteFileSuccess) {
-        scheduleWorkspaceRefresh(0);
     }
     return finalResult;
 }
