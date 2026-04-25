@@ -2,7 +2,7 @@
 
 ## 进行中
 
-- [ ] **Step 3**：改造 `agent-core/index.ts`（见待做）
+- [ ] **Step 4**：改造 `apps/runtime/server.ts` 新增 API（见待做）
 
 ## 待做
 
@@ -30,6 +30,14 @@
   - 刷新页面后会话 ID 和 taskSummaries 恢复
 
 ## 已完成
+
+- [x] **Step 3**：改造 `agent-core/index.ts`（2026-04-25）
+  - 新增 `runTask(sessionId, prompt, selectedFile, onEvent, onConfirm)`
+  - `createAgentCore()` 新增可选 `sessionStore` 参数
+  - 构建 system prompt（含工作区快照 + project-memory + 近5条 taskSummaries）
+  - 组装 llmMessages = system + 历史 + 当前用户消息
+  - loop 结束后持久化消息和 TaskSummary 到 session
+  - `preview()` 清理为纯向后兼容别名，走相同 ReAct loop
 
 - [x] **Step 2**：ReAct Loop 改造（`packages/agent-core/executor.ts`）（2026-04-25）
   - `runModel()` → `runReActLoop()`，实现标准 ReAct 循环（最多 20 轮）

@@ -3,7 +3,21 @@
 ## [Unreleased]
 
 ### 进行中
-- Step 3：改造 agent-core/index.ts（runTask + sessionStore 注入）
+- Step 4：改造 runtime/server.ts，新增会话和 chat API
+
+---
+
+## 2026-04-25
+
+### Added
+- `packages/agent-core/index.ts`：`runTask()` 主任务入口
+  - `createAgentCore()` 新增可选 `sessionStore` 参数
+  - system prompt 动态构建（工作区快照 + project-memory + 近5条 taskSummaries）
+  - 任务完成后自动写入 TaskSummary 到 session
+  - 第二次任务自动携带历史消息（多任务记忆）
+
+### Changed
+- `packages/agent-core/index.ts`：`preview()` 清理为纯向后兼容别名，内部走相同 ReAct loop
 
 ---
 
