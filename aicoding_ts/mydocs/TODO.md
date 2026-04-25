@@ -2,11 +2,7 @@
 
 ## 进行中
 
-- [ ] **Step 2**：ReAct Loop 改造（`packages/agent-core/executor.ts`）
-  - `runModel()` → `runReActLoop()`
-  - 工具结果以 `tool_result` 消息回传给模型
-  - 新增 `ask_user` 工具定义
-  - `parallel_tool_calls` 改为 `false`
+- [ ] **Step 3**：改造 `agent-core/index.ts`（见待做）
 
 ## 待做
 
@@ -35,7 +31,12 @@
 
 ## 已完成
 
-- [x] **Step 1**：数据类型 + session-store 持久化层（2026-04-25）
+- [x] **Step 2**：ReAct Loop 改造（`packages/agent-core/executor.ts`）（2026-04-25）
+  - `runModel()` → `runReActLoop()`，实现标准 ReAct 循环（最多 20 轮）
+  - 工具结果以 `tool_result` 消息回传给模型
+  - 新增 `ask_user` 工具定义，loop 暂停等待用户确认
+  - `parallel_tool_calls` 改为 `false`
+  - 导出 `LoopResult`、`ConfirmHook` 类型
   - 新建 `packages/shared/types.ts`（ChatMessage、Session、TaskSummary、AgentEvent、PendingConfirm）
   - 新建 `packages/session-store/index.ts`（createSession、loadSession、appendMessages 等7个方法）
   - `packages/shared/index.ts` 新增 re-export types.ts

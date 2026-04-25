@@ -3,11 +3,19 @@
 ## [Unreleased]
 
 ### 进行中
-- Step 2：ReAct Loop 改造（executor.ts）
+- Step 3：改造 agent-core/index.ts（runTask + sessionStore 注入）
 
 ---
 
 ## 2026-04-25
+
+### Added
+- `packages/agent-core/executor.ts`：`runReActLoop()` 标准 ReAct 循环
+  - 工具结果以 `tool_result` 消息回传模型，支持多轮推理（最多 20 轮）
+  - 新增 `ask_user` 工具，loop 遇到时暂停并触发 `onConfirm` 钩子，等用户响应后继续
+  - 推送 `task_status(waiting_confirm)` 事件
+  - 导出 `LoopResult`、`ConfirmHook` 类型
+- `packages/agent-core/index.ts`：临时桥接 `runReActLoop()`（Step 3 完整重构）
 
 ### Added
 - `packages/shared/types.ts`：新增所有核心类型定义

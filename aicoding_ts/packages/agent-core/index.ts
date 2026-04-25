@@ -114,9 +114,17 @@ export function createAgentCore(contextBuilder: { buildForPrompt: (prompt: strin
 
       const messages = buildMessages(context, taskState.status, taskState);
       recordPhase(taskState, 'execution', '开始请求模型并执行工具');
-      const { result, content, toolCalls, toolResults } = (await executor.runModel(llmClient, messages, onChunk ?? undefined)) as ExecutorResult;
 
-      taskState.toolCalls.push(...toolCalls);
+      const onEvent = (event: unknown) => { if (onChunk) onChunk(event); };
+      const loopResult = await executor.runReActLoop(llmClient, messages as import('../shared/types.ts').ChatMessage[], onEvent as Parameters<typeof executor.runReActLoop>[2]);
+      const { finalContent: content, toolsUsed, filesModified, messages: loopMessages } = loopResult;
+
+      // 将 loop 产生的消息展平为旧格式供 reviewer/summarizer 使用
+      const toolResults = loopMessages
+        .filter((m) => m.role === 'tool')
+        .map((m) => ({ name: (m as import('../shared/types.ts').ToolResultMessage).name, result: { ok: true } }));
+
+      taskState.toolCalls.push(...toolsUsed.map((name, i) => ({ id: `call-${i}`, name, arguments: '{}' })));
       taskState.toolResults.push(...toolResults);
 
       const review = reviewer.review({ content, toolResults });
@@ -124,19 +132,15 @@ export function createAgentCore(contextBuilder: { buildForPrompt: (prompt: strin
       taskState.summary = summarizer.summarize({ plan, execution: { content }, review });
       taskState.status = 'done';
 
-      const createdFiles = toolResults
-        .filter((item) => item.name === 'write_file' && item.result?.ok)
-        .map((item) => item.result?.file);
-
       return createSuccessResponse({
         status: 'ok',
         model: llmClient.model,
         output: content,
-        toolCalls,
+        toolCalls: toolsUsed,
         toolResults,
-        createdFiles,
-        transcript: [{ role: 'assistant', content, toolCalls }],
-        raw: result,
+        createdFiles: filesModified,
+        transcript: [{ role: 'assistant', content, toolCalls: toolsUsed }],
+        raw: loopMessages,
         context,
         taskState,
         plan,
