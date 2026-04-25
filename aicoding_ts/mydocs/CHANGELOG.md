@@ -3,9 +3,25 @@
 ## [Unreleased]
 
 ### 进行中
-- Step 4：改造 runtime/server.ts，新增会话和 chat API
+（无）
 
 ---
+
+## 2026-04-25
+
+### Added
+- `apps/runtime/server.ts`：新增会话和 chat API
+  - `GET /api/session` — 返回当前会话 sessionId、messageCount、taskSummaries
+  - `POST /api/session` — 创建新会话，更新 current.json
+  - `POST /api/agent/chat` — 主要 agent 接口（SSE），调用 `runTask()`，携带 sessionId
+  - `POST /api/agent/confirm` — 响应 agent 确认请求，resolve 挂起的 Promise
+  - `pendingConfirms: Map<string, PendingConfirm>` — 内存 confirm 挂起表（5 分钟超时）
+  - `createConfirmHook()` — 为每次任务生成 confirm 钩子
+  - `GET /api/meta` 新增 `sessionId` 字段
+
+### Changed
+- `apps/runtime/server.ts`：模块级初始化加入 `sessionStore`，`agentCore` 注入 sessionStore 参数
+
 
 ## 2026-04-25
 

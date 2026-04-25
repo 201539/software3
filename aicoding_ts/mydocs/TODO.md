@@ -2,23 +2,9 @@
 
 ## 进行中
 
-- [ ] **Step 4**：改造 `apps/runtime/server.ts` 新增 API（见待做）
+（无）
 
 ## 待做
-
-- [ ] **Step 3**：改造 `agent-core/index.ts`
-  - 新增 `runTask(sessionId, prompt, selectedFile, onEvent, onConfirm)`
-  - `createAgentCore()` 注入 `sessionStore` 参数
-  - 构建 system prompt（含 project-memory + 近5条 taskSummaries）
-  - 保留 `preview()` 作向后兼容别名
-
-- [ ] **Step 4**：改造 `apps/runtime/server.ts` 新增 API
-  - `GET /api/session` — 获取当前会话信息
-  - `POST /api/session` — 创建新会话
-  - `POST /api/agent/chat` — 主要 agent 接口（SSE）
-  - `POST /api/agent/confirm` — 响应 agent 确认请求
-  - 初始化 `sessionStore`，注入 `agentCore`
-  - 实现 `pendingConfirms` Map + `createConfirmHook`
 
 - [ ] **Step 5**：前端改造
   - `apps/web/index.html`：新建会话按钮、会话 ID 显示
@@ -30,6 +16,14 @@
   - 刷新页面后会话 ID 和 taskSummaries 恢复
 
 ## 已完成
+
+- [x] **Step 4**：改造 `apps/runtime/server.ts` 新增 API（2026-04-25）
+  - `GET /api/session` — 返回当前会话信息（messageCount + taskSummaries）
+  - `POST /api/session` — 创建新会话
+  - `POST /api/agent/chat` — 主要 agent 接口（SSE），调用 `runTask()`
+  - `POST /api/agent/confirm` — 响应 agent 确认请求
+  - `pendingConfirms` Map + `createConfirmHook()`
+  - `GET /api/meta` 新增 `sessionId` 字段
 
 - [x] **Step 3**：改造 `agent-core/index.ts`（2026-04-25）
   - 新增 `runTask(sessionId, prompt, selectedFile, onEvent, onConfirm)`
