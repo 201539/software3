@@ -33,6 +33,13 @@ type ContextBuilder = {
   buildForPrompt: (prompt: string, selectedFile?: string | null) => Context;
 };
 
+function truncateMessages(messages: ChatMessage[], maxCount = 40): ChatMessage[] {
+  if (messages.length <= maxCount) return messages;
+  const tail = messages.slice(-maxCount);
+  const firstUser = tail.findIndex((m) => m.role === 'user');
+  return firstUser > 0 ? tail.slice(firstUser) : tail;
+}
+
 function buildSystemPrompt(
   context: Context,
   projectMemory: string,
@@ -106,7 +113,7 @@ export function createAgentCore(
     await sessionStore.appendMessages(sessionId, [userMsg]);
 
     // 组装完整 messages：system（不持久化）+ 历史 + 当前用户消息
-    const llmMessages: ChatMessage[] = [systemMsg, ...session.messages, userMsg];
+    const llmMessages: ChatMessage[] = [systemMsg, ...truncateMessages(session.messages), userMsg];
 
     onEvent({ type: 'task_status', taskId, status: 'executing' });
 

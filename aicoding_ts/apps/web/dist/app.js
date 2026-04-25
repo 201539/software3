@@ -142,10 +142,27 @@ function setAgentStatus(status) {
     submitBtn.disabled = status !== 'idle';
     promptInput.disabled = status !== 'idle';
 }
+function renderMarkdown(text) {
+    return text
+        .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+        .replace(/```[\w]*\n?([\s\S]*?)```/g, '<pre><code>$1</code></pre>')
+        .replace(/`([^`\n]+)`/g, '<code>$1</code>')
+        .replace(/\*\*([^*\n]+)\*\*/g, '<strong>$1</strong>')
+        .replace(/^[-*] (.+)$/gm, '<li>$1</li>')
+        .replace(/(<li>[^\0]*?<\/li>(\n|$))+/g, (m) => `<ul>${m}</ul>`)
+        .replace(/\n/g, '<br>');
+}
+const TOOL_COLORS = {
+    write_file: 'var(--accent-2)',
+    read_file: 'var(--muted)',
+    run_command: '#f59e0b',
+    ask_user: '#facc15',
+    list_workspace: 'var(--muted)',
+};
 function appendMessage(role, text) {
     const div = document.createElement('div');
     div.className = `message ${role}`;
-    div.textContent = text;
+    div.innerHTML = renderMarkdown(text);
     chatLog.appendChild(div);
     chatLog.scrollTop = chatLog.scrollHeight;
     return div;
@@ -612,17 +629,20 @@ async function streamChat(prompt) {
     let currentMessageElement = assistantMessage;
     let toolCallElement = null;
     let pendingToolDetails = '';
-    const ensureToolNode = () => {
+    const ensureToolNode = (toolName) => {
         if (toolCallElement)
             return toolCallElement;
         toolCallElement = document.createElement('div');
         toolCallElement.className = 'tool-call';
         toolCallElement.dataset.kind = 'tool';
         toolCallElement.dataset.expanded = 'false';
+        const color = toolName ? (TOOL_COLORS[toolName] ?? 'var(--muted)') : 'var(--muted)';
+        const label = toolName ?? '工具调用';
         toolCallElement.innerHTML = `
       <button type="button" class="tool-call-header">
         <span class="tool-call-arrow">▸</span>
-        <span class="tool-call-title">工具调用结果</span>
+        <span class="tool-call-badge" style="background:${color}20;color:${color};border-color:${color}40">${label}</span>
+        <span class="tool-call-title">执行结果</span>
       </button>
       <pre class="tool-call-body"></pre>
     `;
@@ -641,15 +661,27 @@ async function streamChat(prompt) {
         return toolCallElement;
     };
     const updateAssistant = (text) => {
-        currentMessageElement.textContent = text;
+        const body = currentMessageElement.querySelector('.tool-call-body');
+        if (body) {
+            body.innerHTML = renderMarkdown(text);
+            body.style.display = 'block';
+            currentMessageElement.dataset.expanded = 'true';
+            const arrow = currentMessageElement.querySelector('.tool-call-arrow');
+            if (arrow)
+                arrow.textContent = '▾';
+        }
+        else {
+            currentMessageElement.innerHTML = renderMarkdown(text);
+        }
         chatLog.scrollTop = chatLog.scrollHeight;
     };
-    const appendToolDetail = (text) => {
-        const node = ensureToolNode();
+    const appendToolDetail = (toolName, text) => {
+        const node = ensureToolNode(toolName);
         const body = node.querySelector('.tool-call-body');
         pendingToolDetails = pendingToolDetails ? `${pendingToolDetails}\n${text}` : text;
         body.textContent = pendingToolDetails;
     };
+    let accumulatedChunks = '';
     while (true) {
         const { value, done } = await reader.read();
         if (done)
@@ -667,10 +699,11 @@ async function streamChat(prompt) {
             try {
                 const event = JSON.parse(payload);
                 if (event.type === 'chunk') {
-                    updateAssistant((assistantMessage.textContent || '') + event.chunk);
+                    accumulatedChunks += event.chunk;
+                    updateAssistant(accumulatedChunks);
                 }
                 else if (event.type === 'tool') {
-                    appendToolDetail(`${event.summary || '工具调用结果'}\n\n${event.detail || ''}`);
+                    appendToolDetail(event.tool, `${event.summary || '工具调用结果'}\n\n${event.detail || ''}`);
                     if (event.tool === 'write_file') {
                         sawWriteFileSuccess = true;
                         scheduleWorkspaceRefresh(300);

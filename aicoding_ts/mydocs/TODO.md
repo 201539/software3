@@ -6,6 +6,21 @@
 
 ## 待做
 
+（无）
+
+## 已完成（新周期 2026-04-25）
+
+- [x] **新周期 Step 1**：工作区磁盘扫描（loadFromDisk 真正扫描）（2026-04-25）
+  - `packages/workspace-manager/index.ts`：新增 `scanDir()`，`loadFromDisk()` 改为递归扫描磁盘
+- [x] **新周期 Step 2**：打开已有工作区（WORKSPACE_DIR 环境变量）（2026-04-25）
+  - `apps/runtime/server.ts`：传入 `process.env.WORKSPACE_DIR`
+  - `.env.example`：新增 `WORKSPACE_DIR` 说明
+- [x] **新周期 Step 3**：messages 滑动窗口截断（2026-04-25）
+  - `packages/agent-core/index.ts`：`truncateMessages(messages, maxCount=40)` + user 边界截断
+- [x] **新周期 Step 4**：前端 Markdown 渲染 + 工具调用卡颜色优化（2026-04-25）
+  - `apps/web/app.ts`：`renderMarkdown()`、`TOOL_COLORS`、工具卡彩色徽章、chunk 累积渲染
+  - `apps/web/styles.css`：代码块、列表、加粗、工具徽章样式
+
 - [x] **Step 5**：前端改造（2026-04-25）
   - `apps/web/index.html`：topbar 新增会话 ID 徽章、状态徽章、新建会话按钮
   - `apps/web/app.ts`：`streamChat()`、`initSession()`、`renderConfirmCard()`、`submitConfirm()`、`createNewSession()`、`setAgentStatus()`

@@ -113,7 +113,9 @@ function createConfirmHook(
 }
 
 // ── 模块级初始化 ──
-const workspaceManager: WorkspaceManager = createWorkspaceManager();
+const workspaceManager: WorkspaceManager = createWorkspaceManager({
+  rootDir: process.env.WORKSPACE_DIR,
+});
 const toolGateway: ToolGateway = createToolGateway(workspaceManager);
 const contextBuilder = createContextBuilder(toolGateway);
 const llmClient = createLlmClient();

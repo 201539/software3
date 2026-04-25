@@ -9,3 +9,4 @@ node_modules/
 mydocs/**
 !mydocs/TODO.md
 !mydocs/CHANGELOG.md
+.playwright-mcp

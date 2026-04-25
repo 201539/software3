@@ -1,4 +1,4 @@
-import { mkdir, readFile, rename, rm, stat, writeFile } from 'node:fs/promises';
+import { mkdir, readFile, readdir, rename, rm, stat, writeFile } from 'node:fs/promises';
 import { dirname, join, resolve } from 'node:path';
 import { DEFAULT_PROJECT_ID } from '../shared/index.ts';
 
@@ -244,21 +244,36 @@ export function createWorkspaceManager(options: { projectId?: string; rootDir?: 
     };
   }
 
-  async function loadFromDisk() {
-    await ensureWorkspaceDir();
-    const files = listFiles();
-
-    for (const file of files) {
-      const filePath = resolve(state.rootDir, file.path);
-      try {
-        const content = await readFile(filePath, 'utf8');
-        file.content = content;
-      } catch {
-        await mkdir(dirname(filePath), { recursive: true });
-        await writeFile(filePath, file.content ?? '', 'utf8');
+  async function scanDir(dir: string): Promise<TreeNode[]> {
+    let entries;
+    try {
+      entries = await readdir(dir, { withFileTypes: true });
+    } catch {
+      return [];
+    }
+    const nodes: TreeNode[] = [];
+    for (const entry of entries) {
+      if (entry.name.startsWith('.')) continue;
+      const fullPath = join(dir, entry.name);
+      if (entry.isDirectory()) {
+        nodes.push({
+          id: `folder-${entry.name}`,
+          name: entry.name,
+          type: 'folder',
+          children: await scanDir(fullPath),
+        });
+      } else {
+        let content = '';
+        try { content = await readFile(fullPath, 'utf8'); } catch { /* binary or unreadable, skip content */ }
+        nodes.push({ id: `file-${entry.name}`, name: entry.name, type: 'file', content });
       }
     }
+    return nodes;
+  }
 
+  async function loadFromDisk() {
+    await ensureWorkspaceDir();
+    state.tree = await scanDir(state.rootDir);
     return state.tree;
   }
 

@@ -7,6 +7,23 @@
 
 ---
 
+## 2026-04-25（新周期）
+
+### Added
+- `packages/workspace-manager/index.ts`：`scanDir()` 递归磁盘扫描，`loadFromDisk()` 改为真正扫描工作区目录
+- `packages/agent-core/index.ts`：`truncateMessages(messages, maxCount=40)` 滑动窗口截断，在 user 消息边界截断避免孤立 tool_result
+- `apps/web/app.ts`：`renderMarkdown()` XSS 安全 Markdown 渲染（无新依赖），`TOOL_COLORS` 按工具名着色，chunk 累积后整体渲染，工具调用卡彩色徽章
+- `apps/web/styles.css`：`.message pre/code/ul/li/strong`、`.tool-call-badge` 样式
+
+### Changed
+- `apps/runtime/server.ts`：`createWorkspaceManager` 传入 `process.env.WORKSPACE_DIR`
+- `.env.example`：新增 `WORKSPACE_DIR` 可选配置说明
+
+### Fixed
+- `apps/web/app.ts`：修复 `tool` 事件后续 `chunk` 覆盖工具卡结构的 bug——`updateAssistant` 检测 `.tool-call-body` 存在时写入 body 而非整体 innerHTML，工具徽章、折叠箭头结构不再被破坏
+
+---
+
 ## 2026-04-25
 
 ### Fixed
