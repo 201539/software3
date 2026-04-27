@@ -4,10 +4,12 @@
 
 ## 功能
 
-- **聊天驱动**：向 AI 下达自然语言编码指令，Agent 自主规划并执行
+- **聊天驱动**：向 AI 下达自然语言编码指令，Agent 自主规划并执行（ReAct 循环，最多 20 轮）
+- **智能文件编辑**：Agent 优先用 `patch_file` 做局部修改，仅在新建或整文件重写时使用 `write_file`；支持 `search_in_workspace` 先定位再修改
 - **文件管理**：浏览、编辑、创建、重命名、删除工作区文件
 - **实时流式输出**：通过 Server-Sent Events 显示 Agent 执行进度
 - **会话管理**：多会话独立隔离，支持切换历史会话并还原完整对话
+- **MCP 兼容**：内置 MCP server（JSON-RPC 2.0），可作为标准 MCP 工具服务被外部客户端接入
 - **Mock 模式**：未配置 LLM 凭据时自动降级，不影响文件管理功能
 
 ## 环境要求
@@ -146,12 +148,13 @@ LLM_PROVIDER=doubao
 │   └── web/                     # 前端（原生 TypeScript）
 ├── packages/
 │   ├── agent-core/              # Agent 流程（ReAct 循环，最多 20 轮）
+│   ├── mcp-server/              # MCP server（JSON-RPC 2.0，工具/资源/提示词注册）
 │   ├── llm-client/              # LLM 客户端抽象层
 │   │   ├── types.ts             # LlmClient 接口定义
 │   │   ├── openai.ts            # OpenAI-compatible 实现
 │   │   ├── mock.ts              # Mock 实现
 │   │   └── index.ts             # 工厂函数 createLlmClient()
-│   ├── tool-gateway/            # 工具调用（读写文件、执行命令，按需磁盘读取）
+│   ├── tool-gateway/            # 工具调用（读写文件、执行命令，按需磁盘读取，MCP 注册）
 │   ├── workspace-manager/       # 工作区文件树管理（运行时可切换根目录）
 │   ├── session-store/           # 会话持久化（JSON 文件，支持列举/切换）
 │   ├── context-builder/         # 构建 LLM 上下文（按相关性选文件）
@@ -181,6 +184,11 @@ LLM_PROVIDER=doubao
 | `/api/tool/run` | POST | 执行命令 |
 | `/api/agent/chat` | POST | Agent 执行（SSE 流式） |
 | `/api/agent/confirm` | POST | 响应 Agent 确认请求 |
+| `/mcp` | GET | MCP SSE ready 事件 |
+| `/mcp` | POST | MCP JSON-RPC handler（`tools/call`、`resources/read` 等） |
+| `/api/mcp/tools` | GET | 列举所有 MCP 工具 |
+| `/api/mcp/resources` | GET | 列举所有 MCP 资源 |
+| `/api/mcp/tool/:name` | POST | 直接调用指定 MCP 工具 |
 
 ## 开发
 

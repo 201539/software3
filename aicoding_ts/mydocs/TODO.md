@@ -9,9 +9,20 @@
 - [ ] **上下文管理优化**：将当前的"截断"改为真正的"压缩"
   - 现状：`truncateMessages(messages, 40)` 只是把旧消息从头切掉，信息直接丢失
   - 目标：新任务组装 `llmMessages` 时只传任务摘要（`taskSummaries`），不传原始历史消息；原始消息仅在任务内部 ReAct loop 中使用，任务结束后不再累积传递
-  - 相关文件：`packages/agent-core/index.ts` 第 116 行 `truncateMessages(session.messages)` 调用
+  - 相关文件：`packages/agent-core/index.ts` `truncateMessages(session.messages)` 调用
 
 ## 已完成（新周期 2026-04-27）
+
+- [x] **[合并自 upstream] MCP 协议封装 + search/patch 工具**（2026-04-27）
+  - `packages/mcp-server/index.ts`：新建，JSON-RPC 2.0 MCP server，实现 `tools/call`、`resources/read`、`prompts/get` 等方法
+  - `packages/tool-gateway/index.ts`：所有工具注册为 MCP tool/resource/prompt，暴露 `mcp` 属性；`read_file` handler 改为磁盘读取（保留路径安全校验）
+  - `packages/workspace-manager/index.ts`：新增 `searchInWorkspace()`（正则全文搜索，返回行列片段）和 `patchFile()`（支持 unified diff / `before---after` / `before=>after` 格式）
+  - `packages/agent-core/executor.ts`：新增 `search_in_workspace`、`patch_file` 工具；`patch_file` 写入也计入 `filesModified`
+  - `packages/agent-core/index.ts`：system prompt 加入 patch_file 优先使用指引
+  - `apps/runtime/server.ts`：新增 `GET/POST /mcp` 端点（MCP SSE ready + JSON-RPC handler）及 `/api/mcp/*` 辅助路由
+  - 保留：`scanDir`/`switchRoot`/`loadFromDisk`、`session-store`、`runTask`、confirm 机制、所有 session/workspace API
+
+
 
 - [x] **运行时切换工作区**：页面上自由加载本地目录（2026-04-27）
   - `packages/workspace-manager/index.ts`：`switchRoot()` + `getRootDir()`；`scanDir()` 深度限制（6层）、跳过大目录、不读文件内容

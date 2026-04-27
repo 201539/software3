@@ -7,7 +7,20 @@
 
 ---
 
-## 2026-04-27（二）
+## 2026-04-27（三）— 合并自 upstream/master
+
+### Added
+- `packages/mcp-server/index.ts`：**[upstream]** JSON-RPC 2.0 MCP server 实现，支持 `tools/list`、`tools/call`、`resources/list`、`resources/read`、`prompts/list`、`prompts/get`、`initialize` 等方法；导出 `McpServer` 类型（补充）
+- `packages/workspace-manager/index.ts`：**[upstream]** `searchInWorkspace(query, path?)` 全文搜索（返回行/列/片段）；`patchFile(path, patch)` 局部补丁应用（支持 unified diff / `before\n---\nafter` / `before => after`）
+- `packages/agent-core/executor.ts`：**[upstream]** 新增 `search_in_workspace`、`patch_file` 工具定义及调用；`patch_file` 写入记入 `filesModified`
+- `apps/runtime/server.ts`：**[upstream]** `GET /mcp` — SSE ready 事件；`POST /mcp` — JSON-RPC handler；`GET /api/mcp/tools`、`/api/mcp/resources`、`/api/mcp/prompts` 列表路由；`POST /api/mcp/tool/:name`、`/api/mcp/prompt/:name`、`GET /api/mcp/resource/:name` 单项调用路由
+
+### Changed
+- `packages/tool-gateway/index.ts`：**[upstream]** 所有工具注册为 MCP tool/resource/prompt，暴露 `mcp: McpServer` 属性；**[保留我方]** `read_file` handler 改为磁盘读取（保留路径安全校验）；`WorkspaceManager` 类型新增 `projectId` 和 `getRootDir`
+- `packages/agent-core/index.ts`：**[我方调整]** system prompt 加入 `patch_file` 优先修改已有文件、`search_in_workspace` 先定位目标的使用指引
+- `packages/agent-core/mcp-client.ts`：**[upstream]** 新建，`McpToolClient` 类型别名
+
+
 
 ### Added
 - `apps/web/app.ts`：`promptInput` Enter 键直接发送消息，Shift+Enter 换行；路径输入框 Tab 键填入补全第一项并展开下一层子目录
