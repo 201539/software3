@@ -766,7 +766,7 @@ async function initSession() {
 async function createNewSession() {
     const confirmed = await showConfirmDialog({
         title: '新建会话',
-        message: '新建会话将清空当前聊天记录（历史任务摘要会保留在新会话的记忆中）。确定继续？',
+        message: '新建会话将清空当前聊天记录和任务历史，新会话将从空白状态开始。确定继续？',
         confirmLabel: '新建',
         danger: false,
     });
