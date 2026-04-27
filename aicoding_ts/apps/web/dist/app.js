@@ -228,6 +228,18 @@ workspacePathInput.addEventListener('focus', () => {
 workspacePathInput.addEventListener('keydown', (e) => {
     if (e.key === 'Escape')
         hideSuggestList();
+    if (e.key === 'Tab') {
+        const first = workspaceSuggestList.querySelector('li');
+        if (first) {
+            e.preventDefault();
+            const path = first.textContent ?? '';
+            workspacePathInput.value = path;
+            hideSuggestList();
+            fetchSuggestions(path).then((suggestions) => {
+                renderSuggestItems(suggestions.map((p) => ({ path: p, isHistory: false })));
+            });
+        }
+    }
     if (e.key === 'Enter') {
         e.preventDefault();
         loadWorkspaceBtn.click();
@@ -906,6 +918,12 @@ async function streamChat(prompt) {
 }
 editor.addEventListener('input', saveCurrentFile);
 editor.addEventListener('blur', saveCurrentFile);
+promptInput.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter' && !e.shiftKey) {
+        e.preventDefault();
+        chatForm.requestSubmit();
+    }
+});
 chatForm.addEventListener('submit', async (event) => {
     event.preventDefault();
     const prompt = promptInput.value.trim();
