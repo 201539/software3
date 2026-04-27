@@ -248,12 +248,13 @@ export function startRuntimeServer() {
     // ── GET /api/file/:path ──
     if (url.pathname.startsWith('/api/file/') && req.method === 'GET') {
       const filePath = decodeURIComponent(url.pathname.replace('/api/file/', ''));
-      const file = toolGateway.readFile(filePath) as WorkspaceFile | null;
-      if (!isWorkspaceFile(file)) {
+      const absPath = join(workspaceManager.getRootDir(), filePath);
+      try {
+        const content = await readFile(absPath, 'utf8');
+        sendJson(res, 200, { path: filePath, content });
+      } catch {
         sendJson(res, 404, { error: 'File not found' });
-        return;
       }
-      sendJson(res, 200, file);
       return;
     }
 

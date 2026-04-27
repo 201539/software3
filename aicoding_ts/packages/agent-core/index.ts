@@ -30,7 +30,7 @@ type SessionStore = {
 };
 
 type ContextBuilder = {
-  buildForPrompt: (prompt: string, selectedFile?: string | null) => Context;
+  buildForPrompt: (prompt: string, selectedFile?: string | null) => Promise<Context>;
 };
 
 function truncateMessages(messages: ChatMessage[], maxCount = 40): ChatMessage[] {
@@ -100,7 +100,7 @@ export function createAgentCore(
     onEvent({ type: 'task_status', taskId, status: 'planning' });
 
     const projectMemory = await sessionStore.readProjectMemory();
-    const context = contextBuilder.buildForPrompt(userPrompt, selectedFile);
+    const context = await contextBuilder.buildForPrompt(userPrompt, selectedFile);
 
     const systemMsg: SystemMessage = {
       role: 'system',
@@ -161,7 +161,7 @@ export function createAgentCore(
     selectedFile: string | null = null,
     onChunk: ((chunk: unknown) => void) | null = null,
   ) {
-    const context = contextBuilder.buildForPrompt(prompt, selectedFile);
+    const context = await contextBuilder.buildForPrompt(prompt, selectedFile);
 
     if (llmClient.model === 'mock') {
       const fallback = '理解需求；构建上下文；生成/修改文件；执行命令验证；回显结果。';
