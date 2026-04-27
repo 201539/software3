@@ -19,6 +19,8 @@ type ToolGateway = {
   writeFile: (path: string, content: string) => unknown;
   runCommand: (command: string) => unknown;
   listWorkspace: () => unknown[];
+  searchInWorkspace: (query: string, path?: string) => unknown;
+  patchFile: (path: string, patch: string) => unknown;
 };
 
 type SessionStore = {
@@ -48,6 +50,8 @@ function buildSystemPrompt(
   const parts = [
     '你是一个 AI Coding Agent，负责在工作区中执行编码任务。',
     '优先使用工具完成文件读取、写入和命令执行，不要编造工具执行结果。',
+    '如果是修改已有文件，优先使用 patch_file 做局部修改；只有新建文件、整文件重写或 patch 失败时才使用 write_file。',
+    '如需先定位目标，可先调用 search_in_workspace。',
     '当任务完成时，用简洁中文总结执行结果。',
     '如需用户确认某个破坏性操作或存在不确定的决策，调用 ask_user 工具提出问题。',
     '',
@@ -109,20 +113,16 @@ export function createAgentCore(
 
     const userMsg: UserMessage = { role: 'user', content: userPrompt };
 
-    // 先持久化用户消息
     await sessionStore.appendMessages(sessionId, [userMsg]);
 
-    // 组装完整 messages：system（不持久化）+ 历史 + 当前用户消息
     const llmMessages: ChatMessage[] = [systemMsg, ...truncateMessages(session.messages), userMsg];
 
     onEvent({ type: 'task_status', taskId, status: 'executing' });
 
     const loopResult = await executor.runReActLoop(llmClient, llmMessages, onEvent, onConfirm);
 
-    // 持久化 loop 产生的新消息
     await sessionStore.appendMessages(sessionId, loopResult.messages);
 
-    // 生成任务摘要
     onEvent({ type: 'task_status', taskId, status: 'summarizing' });
 
     const toolResults = loopResult.messages
@@ -155,7 +155,7 @@ export function createAgentCore(
     return taskSummary;
   }
 
-  // ── 向后兼容的 preview()（无会话管理，保留给旧接口）──
+  // ── 向后兼容的 preview()（无会话管理）──
   async function preview(
     prompt: string,
     selectedFile: string | null = null,

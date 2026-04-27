@@ -8,6 +8,7 @@ import { createToolGateway } from '../../packages/tool-gateway/index.ts';
 import { createWorkspaceManager } from '../../packages/workspace-manager/index.ts';
 import { createSessionStore } from '../../packages/session-store/index.ts';
 import type { AgentEvent, PendingConfirm } from '../../packages/shared/types.ts';
+import type { McpJsonRpcRequest } from '../../packages/mcp-server/index.ts';
 
 type RequestContext = {
   path?: string;
@@ -72,7 +73,13 @@ function sendJson(res: ServerResponse, statusCode: number, data: unknown) {
 
 async function parseBody<T>(req: IncomingMessage): Promise<T> {
   let body = '';
-  for await (const chunk of req) body += chunk;
+  await new Promise<void>((resolve, reject) => {
+    req.on('data', (chunk) => {
+      body += typeof chunk === 'string' ? chunk : chunk.toString('utf8');
+    });
+    req.on('end', () => resolve());
+    req.on('error', (error) => reject(error));
+  });
   return (body ? JSON.parse(body) : {}) as T;
 }
 
@@ -130,7 +137,7 @@ async function tryReadStaticFile(pathname: string) {
   const candidates = [join(webDistRoot, pathname), join(webRoot, pathname)];
   for (const candidate of candidates) {
     try {
-      return await readFile(candidate);
+      return await readFile(candidate, 'utf8');
     } catch {
       continue;
     }
@@ -159,6 +166,26 @@ function sseHeaders() {
 export function startRuntimeServer() {
   const server = createServer(async (req: IncomingMessage, res: ServerResponse) => {
     const url = new URL(req.url || '/', `http://${req.headers.host}`);
+
+    // ── MCP 端点 ──
+    if (url.pathname === '/mcp' && req.method === 'GET') {
+      res.writeHead(200, sseHeaders());
+      res.write(`event: ready\n`);
+      res.write(`data: ${JSON.stringify({ ok: true, serverInfo: { name: 'ai-coding-agent-mcp', version: '0.1.0' } })}\n\n`);
+      return;
+    }
+
+    if (url.pathname === '/mcp' && req.method === 'POST') {
+      const parsed = await parseBody<McpJsonRpcRequest>(req);
+      const response = await toolGateway.mcp.jsonRpc(parsed);
+      if (response === null) {
+        res.writeHead(204);
+        res.end();
+        return;
+      }
+      sendJson(res, 200, response);
+      return;
+    }
 
     // ── GET /api/meta ──
     if (url.pathname === '/api/meta') {
@@ -271,6 +298,45 @@ export function startRuntimeServer() {
       return;
     }
 
+    // ── MCP tool/resource/prompt 辅助路由 ──
+    if (url.pathname === '/api/mcp/tools') {
+      sendJson(res, 200, toolGateway.mcp.listTools());
+      return;
+    }
+
+    if (url.pathname === '/api/mcp/resources') {
+      sendJson(res, 200, toolGateway.mcp.listResources());
+      return;
+    }
+
+    if (url.pathname === '/api/mcp/prompts') {
+      sendJson(res, 200, toolGateway.mcp.listPrompts());
+      return;
+    }
+
+    if (url.pathname.startsWith('/api/mcp/tool/') && req.method === 'POST') {
+      const name = decodeURIComponent(url.pathname.replace('/api/mcp/tool/', ''));
+      const parsed = await parseBody<RequestContext>(req);
+      const result = await toolGateway.mcp.callTool(name, parsed as Record<string, unknown>);
+      sendJson(res, result.success ? 200 : 400, result);
+      return;
+    }
+
+    if (url.pathname.startsWith('/api/mcp/resource/') && req.method === 'GET') {
+      const name = decodeURIComponent(url.pathname.replace('/api/mcp/resource/', ''));
+      const result = await toolGateway.mcp.readResource(name);
+      sendJson(res, result.success ? 200 : 404, result);
+      return;
+    }
+
+    if (url.pathname.startsWith('/api/mcp/prompt/') && req.method === 'POST') {
+      const name = decodeURIComponent(url.pathname.replace('/api/mcp/prompt/', ''));
+      const parsed = await parseBody<RequestContext>(req);
+      const result = await toolGateway.mcp.getPrompt(name, parsed as Record<string, unknown>);
+      sendJson(res, result.success ? 200 : 400, result);
+      return;
+    }
+
     // ── GET /api/file/:path ──
     if (url.pathname.startsWith('/api/file/') && req.method === 'GET') {
       const filePath = decodeURIComponent(url.pathname.replace('/api/file/', ''));
@@ -287,8 +353,17 @@ export function startRuntimeServer() {
     // ── PUT /api/file ──
     if (url.pathname === '/api/file' && req.method === 'PUT') {
       const parsed = await parseBody<RequestContext>(req);
-      const updated = (await agentCore.writeFile(parsed.path ?? '', parsed.content ?? '')) as FileUpdateResponse;
-      sendJson(res, 200, { ok: true, file: updated.file, tree: updated.tree, action: updated.action });
+      const updated = await toolGateway.mcp.callTool('write_file', {
+        path: parsed.path ?? '',
+        content: parsed.content ?? '',
+      });
+
+      if (!updated.success || !updated.data || typeof updated.data !== 'object') {
+        sendJson(res, 400, updated);
+        return;
+      }
+
+      sendJson(res, 200, { ok: true, ...(updated.data as Record<string, unknown>) });
       return;
     }
 

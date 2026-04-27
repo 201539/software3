@@ -3,10 +3,12 @@ workspaces/
 
 node_modules/
 
-
 # personal files
 .DS_Store
 mydocs/**
 !mydocs/TODO.md
 !mydocs/CHANGELOG.md
 .playwright-mcp
+
+todo/
+测试/

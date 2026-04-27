@@ -30,7 +30,7 @@ class DatasetSampleCreate(BaseModel):
     reference_context: dict | None = None
     ground_truth: dict | None = None
     sample_type: str
-    metadata: dict | None = None
+    sample_metadata: dict | None = None
 
 
 class DatasetSampleResponse(DatasetSampleCreate):

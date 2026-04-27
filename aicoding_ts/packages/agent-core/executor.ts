@@ -6,6 +6,8 @@ type ToolGateway = {
   writeFile: (path: string, content: string) => unknown;
   runCommand: (command: string) => unknown;
   listWorkspace: () => unknown;
+  searchInWorkspace: (query: string, path?: string) => unknown;
+  patchFile: (path: string, patch: string) => unknown;
 };
 
 export type ConfirmHook = (question: string, options?: string[]) => Promise<string>;
@@ -42,6 +44,32 @@ const TOOL_DEFINITIONS = [
         type: 'object',
         properties: { path: { type: 'string' }, content: { type: 'string' } },
         required: ['path', 'content'],
+        additionalProperties: false,
+      },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'patch_file',
+      description: '根据局部补丁修改工作区中的文件，优先用于修改已有文件',
+      parameters: {
+        type: 'object',
+        properties: { path: { type: 'string' }, patch: { type: 'string' } },
+        required: ['path', 'patch'],
+        additionalProperties: false,
+      },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'search_in_workspace',
+      description: '在工作区中搜索文本或代码片段',
+      parameters: {
+        type: 'object',
+        properties: { query: { type: 'string' }, path: { type: 'string' } },
+        required: ['query'],
         additionalProperties: false,
       },
     },
@@ -126,6 +154,8 @@ export function createExecutor(toolGateway: ToolGateway) {
   const toolFns: Record<string, (args: Record<string, unknown>) => unknown> = {
     read_file: ({ path }) => toolGateway.readFile(path as string),
     write_file: ({ path, content }) => toolGateway.writeFile(path as string, content as string),
+    patch_file: ({ path, patch }) => toolGateway.patchFile(path as string, patch as string),
+    search_in_workspace: ({ query, path }) => toolGateway.searchInWorkspace(query as string, path as string | undefined),
     run_command: ({ command }) => toolGateway.runCommand(command as string),
     list_workspace: () => toolGateway.listWorkspace(),
   };
@@ -170,12 +200,10 @@ export function createExecutor(toolGateway: ToolGateway) {
           onEvent({ type: 'chunk', chunk: content });
         }
 
-        // 无工具调用或模型主动停止：loop 结束
         if (toolCalls.length === 0 || finishReason === 'stop') {
           break;
         }
 
-        // 逐个执行工具调用
         for (const call of toolCalls) {
           const toolName = call.function.name;
           toolsUsed.push(toolName);
@@ -183,7 +211,6 @@ export function createExecutor(toolGateway: ToolGateway) {
           let toolResult: unknown;
 
           if (toolName === 'ask_user') {
-            // 特殊工具：暂停 loop，等待用户确认
             if (onConfirm) {
               let args: { question?: string; options?: string[] } = {};
               try { args = JSON.parse(call.function.arguments); } catch { /* ignore */ }
@@ -207,8 +234,7 @@ export function createExecutor(toolGateway: ToolGateway) {
               }
             }
 
-            // 记录文件写入
-            if (toolName === 'write_file') {
+            if (toolName === 'write_file' || toolName === 'patch_file') {
               let args: Record<string, unknown> = {};
               try { args = JSON.parse(call.function.arguments || '{}'); } catch { /* ignore */ }
               if (typeof args.path === 'string') filesModified.push(args.path);
