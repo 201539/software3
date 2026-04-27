@@ -7,6 +7,23 @@
 
 ---
 
+## 2026-04-27
+
+### Added
+- `packages/workspace-manager/index.ts`：`switchRoot(newRootDir)` 运行时切换工作区根目录；`getRootDir()` 查询当前根目录
+- `apps/runtime/server.ts`：`POST /api/workspace/load` — 切换工作区并新建会话；`GET /api/fs/suggest?prefix=` — 返回路径前缀匹配的子目录列表（最多10条）
+- `apps/web/index.html`：顶部路径输入框（`#workspacePathInput`）、补全下拉（`#workspaceSuggestList`）、加载按钮（`#loadWorkspaceBtn`）
+- `apps/web/app.ts`：工作区历史记录（localStorage，最多10条）；防抖补全（200ms）；点击补全项后自动加载下一层子目录；加载成功后更新会话/文件树/聊天提示
+- `apps/web/styles.css`：路径输入框、补全下拉样式；补全列表改为 `width: max-content` + 横向滚动，完整显示长路径
+
+### Changed
+- `packages/workspace-manager/index.ts`：`scanDir()` 新增深度限制（6层）、跳过 `node_modules/.git/dist` 等大目录、**不再读取文件内容**（扫描只建结构，内容按需读取）
+- `apps/runtime/server.ts`：`/api/fs/suggest` 补全逻辑改为对最后一段做前缀过滤，输入 `/Users/I` 只返回以 `I` 开头的子目录
+- `apps/web/styles.css`：`.workspace-bar` 去掉 `max-width: 520px` 限制，输入框随 topbar 自由伸展
+
+### Fixed
+- `packages/workspace-manager/index.ts`：`switchRoot()` 改为先 `stat()` 验证路径存在且为目录，不存在时抛出错误而非静默返回空树
+
 ## 2026-04-25（新周期）
 
 ### Added

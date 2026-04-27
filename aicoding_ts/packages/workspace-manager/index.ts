@@ -244,7 +244,11 @@ export function createWorkspaceManager(options: { projectId?: string; rootDir?: 
     };
   }
 
-  async function scanDir(dir: string): Promise<TreeNode[]> {
+  const SKIP_DIRS = new Set(['node_modules', '.git', '.svn', 'dist', '__pycache__', '.cache', 'vendor', '.yarn', 'build', 'coverage', '.next', '.nuxt', 'out']);
+  const MAX_SCAN_DEPTH = 6;
+
+  async function scanDir(dir: string, depth = 0): Promise<TreeNode[]> {
+    if (depth > MAX_SCAN_DEPTH) return [];
     let entries;
     try {
       entries = await readdir(dir, { withFileTypes: true });
@@ -256,16 +260,15 @@ export function createWorkspaceManager(options: { projectId?: string; rootDir?: 
       if (entry.name.startsWith('.')) continue;
       const fullPath = join(dir, entry.name);
       if (entry.isDirectory()) {
+        if (SKIP_DIRS.has(entry.name)) continue;
         nodes.push({
           id: `folder-${entry.name}`,
           name: entry.name,
           type: 'folder',
-          children: await scanDir(fullPath),
+          children: await scanDir(fullPath, depth + 1),
         });
       } else {
-        let content = '';
-        try { content = await readFile(fullPath, 'utf8'); } catch { /* binary or unreadable, skip content */ }
-        nodes.push({ id: `file-${entry.name}`, name: entry.name, type: 'file', content });
+        nodes.push({ id: `file-${entry.name}`, name: entry.name, type: 'file' });
       }
     }
     return nodes;
@@ -277,9 +280,25 @@ export function createWorkspaceManager(options: { projectId?: string; rootDir?: 
     return state.tree;
   }
 
+  function getRootDir(): string {
+    return state.rootDir;
+  }
+
+  async function switchRoot(newRootDir: string): Promise<TreeNode[]> {
+    const resolved = resolve(newRootDir);
+    const info = await stat(resolved);
+    if (!info.isDirectory()) throw new Error(`不是目录：${resolved}`);
+    state.rootDir = resolved;
+    state.tree = [];
+    state.tree = await scanDir(state.rootDir);
+    return state.tree;
+  }
+
   return {
     projectId,
     rootDir,
+    getRootDir,
+    switchRoot,
     listTree,
     listFiles,
     findFile,

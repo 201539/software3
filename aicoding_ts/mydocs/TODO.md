@@ -6,7 +6,17 @@
 
 ## 待做
 
-（无）
+- [ ] **上下文管理优化**：将当前的"截断"改为真正的"压缩"
+  - 现状：`truncateMessages(messages, 40)` 只是把旧消息从头切掉，信息直接丢失
+  - 目标：新任务组装 `llmMessages` 时只传任务摘要（`taskSummaries`），不传原始历史消息；原始消息仅在任务内部 ReAct loop 中使用，任务结束后不再累积传递
+  - 相关文件：`packages/agent-core/index.ts` 第 116 行 `truncateMessages(session.messages)` 调用
+
+## 已完成（新周期 2026-04-27）
+
+- [x] **运行时切换工作区**：页面上自由加载本地目录（2026-04-27）
+  - `packages/workspace-manager/index.ts`：`switchRoot()` + `getRootDir()`；`scanDir()` 深度限制（6层）、跳过大目录、不读文件内容
+  - `apps/runtime/server.ts`：`POST /api/workspace/load` + `GET /api/fs/suggest?prefix=`（前缀过滤、最多10条）
+  - `apps/web/`：路径输入框、防抖补全（点击后自动展开下层）、历史记录、错误红框、长路径横向滚动
 
 ## 已完成（新周期 2026-04-25）
 

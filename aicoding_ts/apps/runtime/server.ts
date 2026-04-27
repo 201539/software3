@@ -1,6 +1,6 @@
 import { createServer, type IncomingMessage, type ServerResponse } from 'node:http';
-import { readFile } from 'node:fs/promises';
-import { extname, join } from 'node:path';
+import { readFile, readdir } from 'node:fs/promises';
+import { dirname, extname, join } from 'node:path';
 import { createAgentCore } from '../../packages/agent-core/index.ts';
 import { createContextBuilder } from '../../packages/context-builder/index.ts';
 import { createLlmClient } from '../../packages/llm-client/index.ts';
@@ -194,6 +194,47 @@ export function startRuntimeServer() {
         createdAt: newSession.createdAt,
         isNew: true,
       });
+      return;
+    }
+
+    // ── POST /api/workspace/load（切换工作区目录）──
+    if (url.pathname === '/api/workspace/load' && req.method === 'POST') {
+      const { path: dirPath } = await parseBody<{ path?: string }>(req);
+      if (!dirPath) {
+        sendJson(res, 400, { error: 'path is required' });
+        return;
+      }
+      try {
+        const tree = await workspaceManager.switchRoot(dirPath);
+        const newSession = await sessionStore.createSession();
+        sendJson(res, 200, {
+          ok: true,
+          rootDir: workspaceManager.getRootDir(),
+          tree,
+          sessionId: newSession.sessionId,
+        });
+      } catch (err) {
+        sendJson(res, 400, { error: `无法加载路径：${err instanceof Error ? err.message : String(err)}` });
+      }
+      return;
+    }
+
+    // ── GET /api/fs/suggest（路径补全）──
+    if (url.pathname === '/api/fs/suggest' && req.method === 'GET') {
+      const prefix = url.searchParams.get('prefix') ?? '';
+      try {
+        const endsWithSep = prefix.endsWith('/');
+        const dir = endsWithSep ? prefix : (dirname(prefix) || '/');
+        const partial = endsWithSep ? '' : prefix.slice(dir.endsWith('/') ? dir.length : dir.length + 1);
+        const entries = await readdir(dir, { withFileTypes: true });
+        const suggestions = entries
+          .filter((e) => e.isDirectory() && !e.name.startsWith('.') && e.name.startsWith(partial))
+          .slice(0, 10)
+          .map((e) => join(dir, e.name) + '/');
+        sendJson(res, 200, { suggestions });
+      } catch {
+        sendJson(res, 200, { suggestions: [] });
+      }
       return;
     }
 

@@ -13,6 +13,10 @@ const newItemMenu = document.querySelector('#newItemMenu');
 const sessionBadge = document.querySelector('#sessionBadge');
 const agentStatusBadge = document.querySelector('#agentStatusBadge');
 const newSessionBtn = document.querySelector('#newSessionBtn');
+const workspacePathInput = document.querySelector('#workspacePathInput');
+const workspaceSuggestList = document.querySelector('#workspaceSuggestList');
+const loadWorkspaceBtn = document.querySelector('#loadWorkspaceBtn');
+;
 let selectedFile = null;
 let currentFileContent = '';
 let workspaceCache = [];
@@ -129,6 +133,159 @@ function loadExpandedFolders() {
 function persistExpandedFolders() {
     localStorage.setItem('expandedFolders', JSON.stringify([...expandedFolders]));
 }
+// ── 工作区历史记录 ──
+const WORKSPACE_HISTORY_KEY = 'workspaceHistory';
+const WORKSPACE_HISTORY_MAX = 10;
+function loadWorkspaceHistory() {
+    try {
+        return JSON.parse(localStorage.getItem(WORKSPACE_HISTORY_KEY) ?? '[]');
+    }
+    catch {
+        return [];
+    }
+}
+function saveWorkspaceHistory(path) {
+    const history = loadWorkspaceHistory().filter((p) => p !== path);
+    history.unshift(path);
+    localStorage.setItem(WORKSPACE_HISTORY_KEY, JSON.stringify(history.slice(0, WORKSPACE_HISTORY_MAX)));
+}
+// ── 路径补全 ──
+let suggestDebounceTimer = null;
+function hideSuggestList() {
+    workspaceSuggestList.classList.remove('visible');
+    workspaceSuggestList.innerHTML = '';
+}
+function renderSuggestItems(items) {
+    if (items.length === 0) {
+        hideSuggestList();
+        return;
+    }
+    workspaceSuggestList.innerHTML = '';
+    items.forEach(({ path, isHistory }) => {
+        const li = document.createElement('li');
+        li.textContent = path;
+        if (isHistory)
+            li.classList.add('history-item');
+        li.addEventListener('mousedown', (e) => {
+            e.preventDefault();
+            workspacePathInput.value = path;
+            hideSuggestList();
+            fetchSuggestions(path).then((suggestions) => {
+                const items = suggestions.map((p) => ({ path: p, isHistory: false }));
+                renderSuggestItems(items);
+            });
+        });
+        workspaceSuggestList.appendChild(li);
+    });
+    workspaceSuggestList.classList.add('visible');
+}
+async function fetchSuggestions(prefix) {
+    try {
+        const res = await fetch(`/api/fs/suggest?prefix=${encodeURIComponent(prefix)}`);
+        const data = await res.json();
+        return data.suggestions ?? [];
+    }
+    catch {
+        return [];
+    }
+}
+workspacePathInput.addEventListener('input', () => {
+    if (suggestDebounceTimer)
+        clearTimeout(suggestDebounceTimer);
+    suggestDebounceTimer = setTimeout(async () => {
+        const prefix = workspacePathInput.value.trim();
+        if (!prefix) {
+            hideSuggestList();
+            return;
+        }
+        const [fsSuggestions, history] = await Promise.all([
+            fetchSuggestions(prefix),
+            Promise.resolve(loadWorkspaceHistory().filter((h) => h.startsWith(prefix))),
+        ]);
+        const seen = new Set();
+        const items = [];
+        for (const p of fsSuggestions) {
+            if (!seen.has(p)) {
+                seen.add(p);
+                items.push({ path: p, isHistory: false });
+            }
+        }
+        for (const p of history) {
+            if (!seen.has(p)) {
+                seen.add(p);
+                items.push({ path: p, isHistory: true });
+            }
+        }
+        renderSuggestItems(items);
+    }, 200);
+});
+workspacePathInput.addEventListener('focus', () => {
+    if (workspacePathInput.value.trim())
+        return;
+    const history = loadWorkspaceHistory();
+    renderSuggestItems(history.map((p) => ({ path: p, isHistory: true })));
+});
+workspacePathInput.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape')
+        hideSuggestList();
+    if (e.key === 'Enter') {
+        e.preventDefault();
+        loadWorkspaceBtn.click();
+    }
+});
+// ── 加载工作区 ──
+function setWorkspaceError(msg) {
+    if (msg) {
+        workspacePathInput.classList.add('error');
+        workspacePathInput.title = msg;
+    }
+    else {
+        workspacePathInput.classList.remove('error');
+        workspacePathInput.title = '';
+    }
+}
+loadWorkspaceBtn.addEventListener('click', async () => {
+    const path = workspacePathInput.value.trim();
+    if (!path)
+        return;
+    hideSuggestList();
+    loadWorkspaceBtn.disabled = true;
+    loadWorkspaceBtn.textContent = '加载中…';
+    setWorkspaceError(null);
+    try {
+        const res = await fetch('/api/workspace/load', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ path }),
+        });
+        const data = await res.json();
+        if (!data.ok) {
+            setWorkspaceError(data.error ?? '加载失败');
+            return;
+        }
+        saveWorkspaceHistory(path);
+        workspaceCache = data.tree ?? [];
+        renderTree(workspaceCache);
+        if (data.sessionId) {
+            currentSessionId = data.sessionId;
+            const shortId = data.sessionId.replace('session-', '').slice(-6);
+            sessionBadge.textContent = `会话 #${shortId}`;
+        }
+        chatLog.innerHTML = '';
+        selectedFile = null;
+        currentFile.textContent = '未打开文件';
+        editor.value = '';
+        currentFileContent = '';
+        appendMessage('agent', `已加载工作区：${path}`);
+    }
+    catch (err) {
+        setWorkspaceError(`请求失败：${err.message}`);
+    }
+    finally {
+        loadWorkspaceBtn.disabled = false;
+        loadWorkspaceBtn.textContent = '加载';
+    }
+});
 function setAgentStatus(status) {
     agentStatus = status;
     agentStatusBadge.dataset.status = status;
@@ -782,6 +939,7 @@ newItemMenu?.querySelectorAll('button[data-kind]').forEach((button) => {
 document.addEventListener('click', () => {
     hideContextMenu();
     hideNewItemMenu();
+    hideSuggestList();
 });
 loadLayoutState();
 applyLayoutWidths();

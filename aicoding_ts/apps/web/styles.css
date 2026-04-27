@@ -30,7 +30,7 @@ body {
 }
 .topbar {
   display: flex; justify-content: space-between; align-items: center;
-  margin-bottom: 20px;
+  margin-bottom: 20px; flex-wrap: wrap; gap: 12px;
 }
 .topbar-right {
   display: flex; align-items: center; gap: 10px; flex-wrap: wrap; justify-content: flex-end;
@@ -399,4 +399,83 @@ textarea {
   .workspace-layout { grid-template-columns: 1fr; }
   .panel-resizer { display: none; }
   .chat-panel, .editor-panel, .sidebar { min-height: 0; max-height: none; }
+}
+
+/* ── 工作区路径输入栏 ── */
+.workspace-bar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex: 1;
+  min-width: 0;
+}
+.workspace-label {
+  font-size: 12px;
+  color: var(--muted);
+  white-space: nowrap;
+}
+.workspace-input-wrap {
+  position: relative;
+  flex: 1;
+  min-width: 0;
+}
+#workspacePathInput {
+  width: 100%;
+  padding: 8px 12px;
+  background: rgba(2, 6, 23, 0.55);
+  border: 1px solid var(--panel-border);
+  border-radius: 10px;
+  color: var(--text);
+  font: inherit;
+  font-size: 13px;
+  font-family: Consolas, monospace;
+  outline: none;
+  transition: border-color 160ms;
+}
+#workspacePathInput:focus {
+  border-color: rgba(124, 58, 237, 0.55);
+}
+#workspacePathInput.error {
+  border-color: rgba(239, 68, 68, 0.6);
+}
+.suggest-list {
+  display: none;
+  position: absolute;
+  top: calc(100% + 4px);
+  left: 0;
+  min-width: 100%;
+  width: max-content;
+  max-width: 600px;
+  margin: 0;
+  padding: 6px;
+  list-style: none;
+  background: rgba(15, 23, 42, 0.98);
+  border: 1px solid rgba(148, 163, 184, 0.2);
+  border-radius: 12px;
+  box-shadow: 0 16px 36px rgba(0, 0, 0, 0.4);
+  z-index: 1200;
+  max-height: 240px;
+  overflow-y: auto;
+  overflow-x: auto;
+}
+.suggest-list.visible { display: block; }
+.suggest-list li {
+  padding: 8px 12px;
+  border-radius: 8px;
+  cursor: pointer;
+  font-size: 13px;
+  font-family: Consolas, monospace;
+  color: var(--text);
+  white-space: nowrap;
+}
+.suggest-list li:hover,
+.suggest-list li.active {
+  background: rgba(124, 58, 237, 0.18);
+}
+.suggest-list li.history-item {
+  color: var(--muted);
+}
+.suggest-list li.history-item::before {
+  content: '↺ ';
+  opacity: 0.6;
 }

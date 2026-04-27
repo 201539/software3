@@ -13,6 +13,14 @@
           <p class="eyebrow">Agent First Workspace</p>
           <h1>AI Coding Agent Web MVP</h1>
         </div>
+        <div id="workspaceBar" class="workspace-bar">
+          <span class="workspace-label">工作区</span>
+          <div class="workspace-input-wrap">
+            <input id="workspacePathInput" type="text" placeholder="/path/to/your/project" autocomplete="off" spellcheck="false" />
+            <ul id="workspaceSuggestList" class="suggest-list"></ul>
+          </div>
+          <button type="button" id="loadWorkspaceBtn">加载</button>
+        </div>
         <div class="topbar-right">
           <span id="sessionBadge" class="session-badge">会话加载中…</span>
           <span id="agentStatusBadge" class="agent-status-badge" data-status="idle">空闲</span>
