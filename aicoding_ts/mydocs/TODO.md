@@ -18,6 +18,29 @@
   - `apps/runtime/server.ts`：`POST /api/workspace/load` + `GET /api/fs/suggest?prefix=`（前缀过滤、最多10条）
   - `apps/web/`：路径输入框、防抖补全（点击后自动展开下层）、历史记录、错误红框、长路径横向滚动
 
+- [x] **路径补全增强**（2026-04-27）
+  - 输入部分名称（如 `/Users/I`）只返回匹配前缀的子目录，而非全部列出
+  - 补全列表最多返回 10 条
+  - Tab 键填入第一项并自动展开下一层子目录
+
+- [x] **文件按需读取修复**（2026-04-27）
+  - `scanDir` 去掉文件内容预加载后，修复点击文件无内容、Agent `read_file` 返回空的问题
+  - `tool-gateway.readFile` 改为从磁盘按需读取，加路径安全校验（防路径穿越）
+  - `/api/file/:path` 路由同步改为磁盘读取
+  - `context-builder.buildForPrompt` 改为 async 适配
+
+- [x] **键盘交互优化**（2026-04-27）
+  - 聊天输入框：Enter 发送，Shift+Enter 换行
+  - 路径输入框：Tab 填入补全第一项并展开下一层
+
+- [x] **会话切换**（2026-04-27）
+  - `session-store`：新增 `listSessions()`（扫描所有会话返回摘要）、`switchSession()`
+  - `server.ts`：`GET /api/sessions` + `POST /api/session/switch`
+  - 前端：会话徽章改为可点击按钮，下拉展示本工作区历史会话（ID/时间/最后消息预览/任务数），点击还原完整对话
+
+- [x] **文案修正**（2026-04-27）
+  - 新建会话弹窗描述修正：新会话从空白开始，不继承旧会话任何内容
+
 ## 已完成（新周期 2026-04-25）
 
 - [x] **新周期 Step 1**：工作区磁盘扫描（loadFromDisk 真正扫描）（2026-04-25）
