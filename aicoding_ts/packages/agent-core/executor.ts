@@ -2,7 +2,7 @@ import type { LlmClient } from '../llm-client/index.ts';
 import type { ChatMessage, AssistantMessage, ToolResultMessage, ToolCall, AgentEvent } from '../shared/types.ts';
 
 type ToolGateway = {
-  readFile: (path: string) => unknown;
+  readFile: (path: string) => Promise<unknown> | unknown;
   writeFile: (path: string, content: string) => unknown;
   runCommand: (command: string) => unknown;
   listWorkspace: () => unknown;
