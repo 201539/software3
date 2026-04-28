@@ -1,5 +1,6 @@
 import type { LlmClient } from '../llm-client/index.ts';
 import type { ChatMessage, AssistantMessage, ToolResultMessage, ToolCall, AgentEvent } from '../shared/types.ts';
+import type { ExternalMcpTool } from '../mcp-client/index.ts';
 
 type ToolGateway = {
   readFile: (path: string) => Promise<unknown> | unknown;
@@ -8,6 +9,13 @@ type ToolGateway = {
   listWorkspace: () => unknown;
   searchInWorkspace: (query: string, path?: string) => unknown;
   patchFile: (path: string, patch: string) => unknown;
+};
+
+type ExternalMcpRegistry = {
+  listTools: () => Promise<ExternalMcpTool[]>;
+  callTool: (qualifiedName: string, args?: Record<string, unknown>) => Promise<unknown>;
+  hasExternalTools: () => boolean;
+  normalizeToolName: (serverName: string, toolName: string) => string;
 };
 
 export type ConfirmHook = (question: string, options?: string[]) => Promise<string>;
@@ -21,7 +29,7 @@ export type LoopResult = {
 
 const MAX_ITERATIONS = 20;
 
-const TOOL_DEFINITIONS = [
+const LOCAL_TOOL_DEFINITIONS = [
   {
     type: 'function',
     function: {
@@ -150,7 +158,7 @@ function toolSummary(result: unknown): string {
   return String(result);
 }
 
-export function createExecutor(toolGateway: ToolGateway) {
+export function createExecutor(toolGateway: ToolGateway, externalMcpRegistry?: ExternalMcpRegistry) {
   const toolFns: Record<string, (args: Record<string, unknown>) => unknown> = {
     read_file: ({ path }) => toolGateway.readFile(path as string),
     write_file: ({ path, content }) => toolGateway.writeFile(path as string, content as string),
@@ -159,6 +167,24 @@ export function createExecutor(toolGateway: ToolGateway) {
     run_command: ({ command }) => toolGateway.runCommand(command as string),
     list_workspace: () => toolGateway.listWorkspace(),
   };
+
+  async function buildToolDefinitions() {
+    if (!externalMcpRegistry || !externalMcpRegistry.hasExternalTools()) return LOCAL_TOOL_DEFINITIONS;
+
+    const externalTools = await externalMcpRegistry.listTools();
+    const mapped = externalTools.map((tool) => ({
+      type: 'function' as const,
+      function: {
+        name: externalMcpRegistry.normalizeToolName(tool.server, tool.name),
+        description: `[external:${tool.server}] ${tool.description || tool.name}`,
+        parameters: Object.keys(tool.inputSchema).length > 0
+          ? tool.inputSchema
+          : { type: 'object', properties: {}, additionalProperties: true },
+      },
+    }));
+
+    return [...LOCAL_TOOL_DEFINITIONS, ...mapped];
+  }
 
   return {
     async runReActLoop(
@@ -174,8 +200,9 @@ export function createExecutor(toolGateway: ToolGateway) {
       let finalContent = '';
 
       for (let i = 0; i < MAX_ITERATIONS; i++) {
+        const toolDefinitions = await buildToolDefinitions();
         const result = await llmClient.createMessage(workingMessages, {
-          tools: TOOL_DEFINITIONS,
+          tools: toolDefinitions,
           tool_choice: 'auto',
           parallel_tool_calls: false,
         }) as { choices?: Array<{ message?: unknown; finish_reason?: string }> };
@@ -221,22 +248,27 @@ export function createExecutor(toolGateway: ToolGateway) {
               toolResult = { answer: '已确认' };
             }
           } else {
+            let args: Record<string, unknown> = {};
+            try { args = JSON.parse(call.function.arguments || '{}'); } catch { /* ignore */ }
+
             const fn = toolFns[toolName];
-            if (!fn) {
-              toolResult = { error: `未知工具: ${toolName}` };
-            } else {
-              let args: Record<string, unknown> = {};
-              try { args = JSON.parse(call.function.arguments || '{}'); } catch { /* ignore */ }
+            if (fn) {
               try {
                 toolResult = await fn(args);
               } catch (err) {
                 toolResult = { error: String(err) };
               }
+            } else if (toolName.startsWith('mcp__') && externalMcpRegistry) {
+              try {
+                toolResult = await externalMcpRegistry.callTool(toolName, args);
+              } catch (err) {
+                toolResult = { error: String(err) };
+              }
+            } else {
+              toolResult = { error: `未知工具: ${toolName}` };
             }
 
             if (toolName === 'write_file' || toolName === 'patch_file') {
-              let args: Record<string, unknown> = {};
-              try { args = JSON.parse(call.function.arguments || '{}'); } catch { /* ignore */ }
               if (typeof args.path === 'string') filesModified.push(args.path);
             }
           }

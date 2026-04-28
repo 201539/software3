@@ -205,7 +205,7 @@ h1, h2, p { margin: 0; }
   padding: 10px 14px;
 }
 button { cursor: pointer; }
-.ghost-button { padding: 8px 12px; }
+.ghost-button { padding: 8px 12px; display: inline-flex; align-items: center; text-decoration: none; }
 
 .workspace-layout {
   display: grid;
@@ -239,6 +239,108 @@ button { cursor: pointer; }
   border-top-left-radius: 0;
   border-bottom-left-radius: 0;
 }
+
+.mcp-config-page {
+  max-width: 1180px;
+  margin: 0 auto;
+  padding: 24px;
+}
+
+.mcp-config-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 16px;
+  margin-bottom: 20px;
+}
+
+.mcp-config-panel {
+  margin-bottom: 16px;
+}
+
+.mcp-form {
+  display: grid;
+  gap: 14px;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.mcp-form label {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  font-size: 13px;
+  color: var(--muted);
+}
+
+.mcp-form input,
+.mcp-form select,
+.mcp-form textarea {
+  border-radius: 12px;
+  border: 1px solid var(--panel-border);
+  background: rgba(2, 6, 23, 0.55);
+  color: var(--text);
+  padding: 10px 12px;
+  font: inherit;
+}
+
+.mcp-form textarea {
+  resize: vertical;
+}
+
+.mcp-form .checkbox-row {
+  flex-direction: row;
+  align-items: center;
+}
+
+.mcp-server-list {
+  display: grid;
+  gap: 12px;
+}
+
+.mcp-server-card {
+  border: 1px solid var(--panel-border);
+  background: rgba(255,255,255,0.04);
+  border-radius: 16px;
+  padding: 14px;
+  cursor: pointer;
+}
+
+.mcp-server-card:hover {
+  background: rgba(255,255,255,0.07);
+}
+
+.mcp-server-card-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 8px;
+}
+
+.mcp-server-meta {
+  color: var(--muted);
+  font-size: 13px;
+  margin-bottom: 8px;
+}
+
+.mcp-server-tools {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.mcp-tool-pill {
+  padding: 6px 10px;
+  border-radius: 999px;
+  background: rgba(34, 211, 238, 0.12);
+  color: var(--accent-2);
+  border: 1px solid rgba(34, 211, 238, 0.22);
+  font-size: 12px;
+}
+
+.mcp-badge.on { color: #22c55e; }
+.mcp-badge.off { color: #f97316; }
+.hidden { display: none !important; }
 
 .panel-resizer {
   position: relative;

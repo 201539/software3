@@ -9,6 +9,7 @@ import { createWorkspaceManager } from '../../packages/workspace-manager/index.t
 import { createSessionStore } from '../../packages/session-store/index.ts';
 import type { AgentEvent, PendingConfirm } from '../../packages/shared/types.ts';
 import type { McpJsonRpcRequest } from '../../packages/mcp-server/index.ts';
+import { createExternalMcpRegistry, type ExternalMcpServerConfig } from '../../packages/mcp-client/index.ts';
 
 type RequestContext = {
   path?: string;
@@ -127,7 +128,18 @@ const toolGateway: ToolGateway = createToolGateway(workspaceManager);
 const contextBuilder = createContextBuilder(toolGateway);
 const llmClient = createLlmClient();
 const sessionStore: SessionStore = createSessionStore();
-const agentCore: AgentCore = createAgentCore(contextBuilder, toolGateway, llmClient, sessionStore);
+const externalMcpConfigs: ExternalMcpServerConfig[] = (() => {
+  const raw = process.env.EXTERNAL_MCP_SERVERS;
+  if (!raw) return [];
+  try {
+    const parsed = JSON.parse(raw);
+    return Array.isArray(parsed) ? parsed as ExternalMcpServerConfig[] : [];
+  } catch {
+    return [];
+  }
+})();
+const externalMcpRegistry = createExternalMcpRegistry(externalMcpConfigs);
+const agentCore: AgentCore = createAgentCore(contextBuilder, toolGateway, llmClient, sessionStore, externalMcpRegistry);
 
 await workspaceManager.loadFromDisk();
 await sessionStore.getOrCreateCurrentSession();
@@ -166,6 +178,15 @@ function sseHeaders() {
 export function startRuntimeServer() {
   const server = createServer(async (req: IncomingMessage, res: ServerResponse) => {
     const url = new URL(req.url || '/', `http://${req.headers.host}`);
+
+    if (url.pathname === '/api/external-mcp/tools' && req.method === 'GET') {
+      try {
+        sendJson(res, 200, { tools: await externalMcpRegistry.listTools() });
+      } catch (error: unknown) {
+        sendJson(res, 500, { error: error instanceof Error ? error.message : 'Unknown error' });
+      }
+      return;
+    }
 
     // ── MCP 端点 ──
     if (url.pathname === '/mcp' && req.method === 'GET') {
@@ -281,9 +302,11 @@ export function startRuntimeServer() {
         const partial = endsWithSep ? '' : prefix.slice(dir.endsWith('/') ? dir.length : dir.length + 1);
         const entries = await readdir(dir, { withFileTypes: true });
         const suggestions = entries
-          .filter((e) => e.isDirectory() && !e.name.startsWith('.') && e.name.startsWith(partial))
+          .filter((entry): entry is { name: string; isDirectory: () => boolean } => {
+            return typeof entry !== 'string' && entry.isDirectory() && !entry.name.startsWith('.') && entry.name.startsWith(partial);
+          })
           .slice(0, 10)
-          .map((e) => join(dir, e.name) + '/');
+          .map((entry) => join(dir, entry.name) + '/');
         sendJson(res, 200, { suggestions });
       } catch {
         sendJson(res, 200, { suggestions: [] });

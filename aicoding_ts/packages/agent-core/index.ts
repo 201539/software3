@@ -5,6 +5,7 @@ import { createExecutor } from './executor.ts';
 import type { ConfirmHook } from './executor.ts';
 import { createReviewer } from './reviewer.ts';
 import { createSummarizer } from './summarizer.ts';
+import type { createExternalMcpRegistry } from '../mcp-client/index.ts';
 
 type Context = {
   prompt: string;
@@ -52,6 +53,7 @@ function buildSystemPrompt(
     '优先使用工具完成文件读取、写入和命令执行，不要编造工具执行结果。',
     '如果是修改已有文件，优先使用 patch_file 做局部修改；只有新建文件、整文件重写或 patch 失败时才使用 write_file。',
     '如需先定位目标，可先调用 search_in_workspace。',
+    '如果存在外部 MCP 工具，可按工具名直接调用，它们通常以 mcp__服务名__工具名 的形式出现。',
     '当任务完成时，用简洁中文总结执行结果。',
     '如需用户确认某个破坏性操作或存在不确定的决策，调用 ask_user 工具提出问题。',
     '',
@@ -80,8 +82,9 @@ export function createAgentCore(
   toolGateway: ToolGateway,
   llmClient: LlmClient,
   sessionStore?: SessionStore,
+  externalMcpRegistry?: ReturnType<typeof createExternalMcpRegistry>,
 ) {
-  const executor = createExecutor(toolGateway);
+  const executor = createExecutor(toolGateway, externalMcpRegistry);
   const reviewer = createReviewer();
   const summarizer = createSummarizer();
 
