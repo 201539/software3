@@ -437,6 +437,21 @@ textarea {
   max-height: 360px;
 }
 .panel-header { display: flex; justify-content: space-between; align-items: center; gap: 12px; }
+.editor-header-right { display: inline-flex; align-items: center; gap: 10px; }
+.save-badge {
+  font-size: 12px;
+  border-radius: 999px;
+  padding: 6px 10px;
+  border: 1px solid var(--panel-border);
+  background: rgba(255,255,255,0.05);
+  color: var(--muted);
+  font-variant-numeric: tabular-nums;
+}
+.save-badge[data-state="idle"] { color: var(--muted); }
+.save-badge[data-state="saved"] { color: #22c55e; border-color: rgba(34, 197, 94, 0.35); background: rgba(34, 197, 94, 0.10); }
+.save-badge[data-state="dirty"] { color: #facc15; border-color: rgba(250, 204, 21, 0.35); background: rgba(250, 204, 21, 0.10); }
+.save-badge[data-state="saving"] { color: var(--accent-2); border-color: rgba(34, 211, 238, 0.35); background: rgba(34, 211, 238, 0.10); }
+.save-badge[data-state="error"] { color: #ef4444; border-color: rgba(239, 68, 68, 0.35); background: rgba(239, 68, 68, 0.10); }
 .tree-header { align-items: flex-start; }
 .tree-header-title { display: flex; flex-direction: column; gap: 4px; }
 .tree-header-actions { display: flex; align-items: center; gap: 8px; }

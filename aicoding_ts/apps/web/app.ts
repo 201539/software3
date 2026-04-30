@@ -4,6 +4,7 @@ const promptInput = document.querySelector<HTMLTextAreaElement>('#promptInput')!
 const fileTree = document.querySelector<HTMLElement>('#fileTree')!;
 const editor = document.querySelector<HTMLTextAreaElement>('#editor')!;
 const currentFile = document.querySelector<HTMLElement>('#currentFile')!;
+const editorSaveBadge = document.querySelector<HTMLElement>('#editorSaveBadge')!;
 const summary = document.querySelector<HTMLElement>('#summary')!;
 const refreshBtn = document.querySelector<HTMLButtonElement>('#refreshBtn')!;
 const workspaceLayout = document.querySelector<HTMLElement>('#workspaceLayout')!;
@@ -40,6 +41,7 @@ type PreviewResult = {
 };
 
 type AgentStatusState = 'idle' | 'running' | 'waiting_confirm';
+type SaveState = 'idle' | 'saved' | 'dirty' | 'saving' | 'error';
 
 let selectedFile: string | null = null;
 let currentFileContent = '';
@@ -49,6 +51,8 @@ let editorSaveTimer: ReturnType<typeof setTimeout> | null = null;
 let expandedFolders = new Set<string>();
 let currentSessionId: string | null = null;
 let agentStatus: AgentStatusState = 'idle';
+let saveState: SaveState = 'idle';
+let lastSaveError: string | null = null;
 
 const layoutState = {
   chat: 34,
@@ -162,6 +166,29 @@ function loadExpandedFolders() {
 
 function persistExpandedFolders() {
   localStorage.setItem('expandedFolders', JSON.stringify([...expandedFolders]));
+}
+
+function setSaveState(next: SaveState, detail?: string) {
+  saveState = next;
+  editorSaveBadge.dataset.state = next;
+  const labels: Record<SaveState, string> = {
+    idle: '未打开',
+    saved: '已保存',
+    dirty: '未保存',
+    saving: '保存中…',
+    error: '保存失败',
+  };
+  editorSaveBadge.textContent = labels[next];
+  if (next === 'idle') {
+    editorSaveBadge.title = '未打开文件';
+    lastSaveError = null;
+  } else if (next === 'error') {
+    lastSaveError = detail ?? lastSaveError ?? '未知错误';
+    editorSaveBadge.title = lastSaveError;
+  } else {
+    editorSaveBadge.title = detail ?? editorSaveBadge.textContent ?? '';
+    if (next !== 'error') lastSaveError = null;
+  }
 }
 
 // ── 工作区历史记录 ──
@@ -558,20 +585,35 @@ function showRenameDialog(currentPath: string) {
 function saveCurrentFile() {
   if (!selectedFile) return;
   const content = editor.value;
-  if (content === currentFileContent) return;
+  if (content === currentFileContent) {
+    if (saveState !== 'saved') setSaveState('saved');
+    return;
+  }
+
+  if (saveState !== 'saving') setSaveState('dirty');
 
   if (editorSaveTimer) clearTimeout(editorSaveTimer);
   editorSaveTimer = setTimeout(async () => {
-    const res = await fetch('/api/file', {
-      method: 'PUT',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ path: selectedFile, content: editor.value }),
-    });
-    const data = await res.json();
-    currentFileContent = editor.value;
-    workspaceCache = data.tree || workspaceCache;
-    renderTree(workspaceCache);
-    scheduleWorkspaceRefresh(0);
+    try {
+      setSaveState('saving');
+      const res = await fetch('/api/file', {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ path: selectedFile, content: editor.value }),
+      });
+      const data = await res.json() as { ok?: boolean; tree?: WorkspaceNode[]; error?: string };
+      if (!res.ok || data.ok === false) {
+        throw new Error(data.error || `HTTP ${res.status}`);
+      }
+      currentFileContent = editor.value;
+      workspaceCache = data.tree || workspaceCache;
+      renderTree(workspaceCache);
+      scheduleWorkspaceRefresh(0);
+      setSaveState('saved');
+    } catch (err) {
+      setSaveState('error', (err as Error).message);
+      appendMessage('agent', `保存失败：${(err as Error).message}`);
+    }
   }, 300);
 }
 
@@ -798,6 +840,7 @@ async function openFile(path: string) {
   currentFile.textContent = path;
   currentFileContent = file.content ?? '';
   editor.value = currentFileContent;
+  setSaveState('saved');
 }
 
 function updateTreeEmptyState() {
