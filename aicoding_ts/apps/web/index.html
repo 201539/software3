@@ -51,7 +51,10 @@
         <section class="panel editor-panel resizable-panel" data-panel="editor">
           <div class="panel-header">
             <h2>编辑器</h2>
-            <span>当前文件</span>
+            <div class="editor-header-right">
+              <span id="editorSaveBadge" class="save-badge" data-state="idle" title="未打开文件">未打开</span>
+              <span>当前文件</span>
+            </div>
           </div>
           <textarea id="editor" spellcheck="false"></textarea>
         </section>
