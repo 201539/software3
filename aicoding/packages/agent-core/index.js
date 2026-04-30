@@ -3,6 +3,7 @@ import { createPlanner } from './planner.js';
 import { createExecutor } from './executor.js';
 import { createReviewer } from './reviewer.js';
 import { createSummarizer } from './summarizer.js';
+import { createTemplateGenerator } from '../template-generator/index.js';
 
 function buildMessages(context, phase, taskState) {
   return [
@@ -60,6 +61,7 @@ export function createAgentCore(contextBuilder, toolGateway, llmClient = null) {
   const executor = createExecutor(toolGateway);
   const reviewer = createReviewer();
   const summarizer = createSummarizer();
+  const templateGenerator = createTemplateGenerator();
 
   return {
     async preview(prompt, selectedFile = null, onChunk = null) {
@@ -108,6 +110,70 @@ export function createAgentCore(contextBuilder, toolGateway, llmClient = null) {
         plan,
         review,
       });
+    },
+
+    async generateScaffold(projectParams, onChunk = null) {
+      const taskState = {
+        status: 'generating_scaffold',
+        prompt: `生成 ${projectParams.templateId} 模板项目：${projectParams.projectName}`,
+        selectedFile: null,
+        phases: [],
+        contextBudget: { includedFiles: [], maxChars: 0, maxFiles: 0 },
+        toolCalls: [],
+        toolResults: [],
+        summary: '',
+      };
+
+      try {
+        recordPhase(taskState, 'scaffold_planning', `选择模板 ${projectParams.templateId}`);
+        const generated = templateGenerator.generateProject(projectParams.templateId, projectParams);
+        recordPhase(taskState, 'scaffold_generation', `生成 ${generated.files.length} 个文件`);
+
+        for (const file of generated.files) {
+          const result = await toolGateway.writeFile(file.path, file.content);
+          taskState.toolResults.push({ name: 'write_file', result });
+          if (onChunk) {
+            onChunk({
+              type: 'tool',
+              tool: 'write_file',
+              summary: `创建文件: ${file.path}`,
+            });
+          }
+        }
+
+        recordPhase(taskState, 'scaffold_complete', '项目骨架生成完成');
+        taskState.status = 'done';
+        taskState.summary = `已成功生成 ${generated.scaffoldInfo.templateName} 项目骨架，包含 ${generated.scaffoldInfo.fileCount} 个文件。项目名称：${generated.scaffoldInfo.projectName}`;
+
+        return createSuccessResponse({
+          status: 'scaffold_ok',
+          scaffoldInfo: generated.scaffoldInfo,
+          files: generated.files.map((f) => ({ path: f.path })),
+          output: generated.summary,
+          taskState,
+        });
+      } catch (error) {
+        const message = error instanceof Error ? error.message : '未知错误';
+        recordPhase(taskState, 'scaffold_error', message);
+        taskState.status = 'failed';
+        return createSuccessResponse({
+          status: 'scaffold_error',
+          error: message,
+          taskState,
+        });
+      }
+    },
+
+    getTemplates() {
+      return templateGenerator.getTemplateList();
+    },
+
+    getTemplatesByCategory(category) {
+      return templateGenerator.getTemplatesByCategory(category);
+    },
+
+    getTemplateDetail(templateId) {
+      return templateGenerator.getTemplateDetail(templateId);
     },
 
     readFile(path) {

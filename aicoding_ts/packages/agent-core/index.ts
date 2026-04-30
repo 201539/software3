@@ -1,17 +1,23 @@
-import { createSuccessResponse } from '../shared/index.ts';
-import type { LlmClient } from '../llm-client/index.ts';
-import { createPlanner } from './planner.ts';
-import { createExecutor } from './executor.ts';
-import { createReviewer } from './reviewer.ts';
-import { createSummarizer } from './summarizer.ts';
-import { createMcpClient } from './mcp-client.ts';
+import { createSuccessResponse } from "../shared/index.ts";
+import type { LlmClient } from "../llm-client/index.ts";
+import { createPlanner } from "./planner.ts";
+import { createExecutor } from "./executor.ts";
+import { createReviewer } from "./reviewer.ts";
+import { createSummarizer } from "./summarizer.ts";
+import { createMcpClient } from "./mcp-client.ts";
+import { createTemplateGenerator } from "../template-generator/index.ts";
+import type { TemplateParams } from "../template-generator/types.ts";
 
 type Context = {
   prompt: string;
   selectedFile: string | null;
   selectedFileContent: unknown;
   workspaceSummary: string;
-  contextBudget: { includedFiles: string[]; maxChars: number; maxFiles: number };
+  contextBudget: {
+    includedFiles: string[];
+    maxChars: number;
+    maxFiles: number;
+  };
 };
 
 type TaskState = {
@@ -19,38 +25,44 @@ type TaskState = {
   prompt: string;
   selectedFile: string | null;
   phases: Array<{ phase: string; note: string; at: string }>;
-  contextBudget: Context['contextBudget'];
+  contextBudget: Context["contextBudget"];
   toolCalls: unknown[];
-  toolResults: Array<{ name: string; result?: { ok?: boolean; file?: unknown } }>;
+  toolResults: Array<{
+    name: string;
+    result?: { ok?: boolean; file?: unknown };
+  }>;
   summary: string;
 };
-
 
 type ExecutorResult = {
   result: unknown;
   content: string;
   toolCalls: Array<{ id: string; name: string; arguments: string }>;
-  toolResults: Array<{ name: string; args: unknown; result: { ok?: boolean; file?: unknown } }>;
+  toolResults: Array<{
+    name: string;
+    args: unknown;
+    result: { ok?: boolean; file?: unknown };
+  }>;
 };
 
 function buildMessages(context: Context, phase: string, taskState: TaskState) {
   return [
     {
-      role: 'system',
+      role: "system",
       content: [
-        '你是一个 AI Coding Agent，负责在工作区中执行编码任务。',
-        '你必须优先使用 tools 完成文件读取、写入和命令执行。',
-        '不要编造工具执行结果。',
-        '当任务需要操作文件或命令时，优先调用工具。',
-        '如果是修改已有文件，优先使用 patch_file 做局部修改；只有新建文件、整文件重写或 patch 失败时才使用 write_file。',
-        '如果需要先定位目标，可先调用 search_in_workspace。',
-        '当任务完成时，用简洁中文总结。',
+        "你是一个 AI Coding Agent，负责在工作区中执行编码任务。",
+        "你必须优先使用 tools 完成文件读取、写入和命令执行。",
+        "不要编造工具执行结果。",
+        "当任务需要操作文件或命令时，优先调用工具。",
+        "如果是修改已有文件，优先使用 patch_file 做局部修改；只有新建文件、整文件重写或 patch 失败时才使用 write_file。",
+        "如果需要先定位目标，可先调用 search_in_workspace。",
+        "当任务完成时，用简洁中文总结。",
         `当前阶段：${phase}`,
         `上下文预算：最多包含 ${context.contextBudget?.includedFiles?.length ?? 0} 个文件，最大字符数 ${context.contextBudget?.maxChars ?? 0}。`,
-      ].join('\n'),
+      ].join("\n"),
     },
     {
-      role: 'user',
+      role: "user",
       content: JSON.stringify(
         {
           prompt: context.prompt,
@@ -68,71 +80,106 @@ function buildMessages(context: Context, phase: string, taskState: TaskState) {
   ];
 }
 
-function createTaskState(prompt: string, selectedFile: string | null, context: Context): TaskState {
+function createTaskState(
+  prompt: string,
+  selectedFile: string | null,
+  context: Context,
+): TaskState {
   return {
-    status: 'planning',
+    status: "planning",
     prompt,
     selectedFile,
     phases: [],
     contextBudget: context.contextBudget,
     toolCalls: [],
     toolResults: [],
-    summary: '',
+    summary: "",
   };
 }
 
-function recordPhase(taskState: TaskState, phase: string, note = '') {
+function recordPhase(taskState: TaskState, phase: string, note = "") {
   taskState.status = phase;
   taskState.phases.push({ phase, note, at: new Date().toISOString() });
 }
 
-export function createAgentCore(contextBuilder: { buildForPrompt: (prompt: string, selectedFile?: string | null) => Context }, toolGateway: { mcp: ReturnType<typeof createMcpClient> }, llmClient: LlmClient) {
+export function createAgentCore(
+  contextBuilder: {
+    buildForPrompt: (prompt: string, selectedFile?: string | null) => Context;
+  },
+  toolGateway: { mcp: ReturnType<typeof createMcpClient> },
+  llmClient: LlmClient,
+) {
   const planner = createPlanner();
   const executor = createExecutor(toolGateway);
   const reviewer = createReviewer();
   const summarizer = createSummarizer();
+  const templateGenerator = createTemplateGenerator();
 
   return {
-    async preview(prompt: string, selectedFile: string | null = null, onChunk: ((chunk: unknown) => void) | null = null) {
+    async preview(
+      prompt: string,
+      selectedFile: string | null = null,
+      onChunk: ((chunk: unknown) => void) | null = null,
+    ) {
       const context = contextBuilder.buildForPrompt(prompt, selectedFile);
       const taskState = createTaskState(prompt, selectedFile, context);
       const plan = planner.plan(context);
-      recordPhase(taskState, 'planning', '构建上下文并分析需求');
+      recordPhase(taskState, "planning", "构建上下文并分析需求");
 
-      if (llmClient.model === 'mock') {
-        const fallback = '理解需求；构建上下文；生成/修改文件；执行命令验证；回显结果。';
-        recordPhase(taskState, 'execution', 'mock 模式直接返回结果');
+      if (llmClient.model === "mock") {
+        const fallback =
+          "理解需求；构建上下文；生成/修改文件；执行命令验证；回显结果。";
+        recordPhase(taskState, "execution", "mock 模式直接返回结果");
         const review = reviewer.review({ content: fallback, toolResults: [] });
-        recordPhase(taskState, 'review', review.summary);
-        taskState.summary = summarizer.summarize({ plan, execution: { content: fallback }, review });
+        recordPhase(taskState, "review", review.summary);
+        taskState.summary = summarizer.summarize({
+          plan,
+          execution: { content: fallback },
+          review,
+        });
         if (onChunk) onChunk(fallback);
-        return createSuccessResponse({ status: 'mocked', output: fallback, context, taskState, plan });
+        return createSuccessResponse({
+          status: "mocked",
+          output: fallback,
+          context,
+          taskState,
+          plan,
+        });
       }
 
       const messages = buildMessages(context, taskState.status, taskState);
-      recordPhase(taskState, 'execution', '开始请求模型并执行工具');
-      const { result, content, toolCalls, toolResults } = (await executor.runModel(llmClient, messages, onChunk ?? undefined)) as ExecutorResult;
+      recordPhase(taskState, "execution", "开始请求模型并执行工具");
+      const { result, content, toolCalls, toolResults } =
+        (await executor.runModel(
+          llmClient,
+          messages,
+          onChunk ?? undefined,
+        )) as ExecutorResult;
 
       taskState.toolCalls.push(...toolCalls);
       taskState.toolResults.push(...toolResults);
 
       const review = reviewer.review({ content, toolResults });
-      recordPhase(taskState, 'review', review.summary);
-      taskState.summary = summarizer.summarize({ plan, execution: { content }, review });
-      taskState.status = 'done';
+      recordPhase(taskState, "review", review.summary);
+      taskState.summary = summarizer.summarize({
+        plan,
+        execution: { content },
+        review,
+      });
+      taskState.status = "done";
 
       const createdFiles = toolResults
-        .filter((item) => item.name === 'write_file' && item.result?.ok)
+        .filter((item) => item.name === "write_file" && item.result?.ok)
         .map((item) => item.result?.file);
 
       return createSuccessResponse({
-        status: 'ok',
+        status: "ok",
         model: llmClient.model,
         output: content,
         toolCalls,
         toolResults,
         createdFiles,
-        transcript: [{ role: 'assistant', content, toolCalls }],
+        transcript: [{ role: "assistant", content, toolCalls }],
         raw: result,
         context,
         taskState,
@@ -141,12 +188,111 @@ export function createAgentCore(contextBuilder: { buildForPrompt: (prompt: strin
       });
     },
 
+    /**
+     * 生成项目骨架 - 使用模板创建新项目
+     */
+    async generateScaffold(
+      projectParams: TemplateParams,
+      onChunk?: (chunk: unknown) => void,
+    ) {
+      const taskState: TaskState = {
+        status: "generating_scaffold",
+        prompt: `生成 ${projectParams.templateId} 模板项目：${projectParams.projectName}`,
+        selectedFile: null,
+        phases: [],
+        contextBudget: { includedFiles: [], maxChars: 0, maxFiles: 0 },
+        toolCalls: [],
+        toolResults: [],
+        summary: "",
+      };
+
+      try {
+        recordPhase(
+          taskState,
+          "scaffold_planning",
+          `选择模板 ${projectParams.templateId}`,
+        );
+
+        // 生成项目文件
+        const generated = templateGenerator.generateProject(
+          projectParams.templateId,
+          projectParams,
+        );
+        recordPhase(
+          taskState,
+          "scaffold_generation",
+          `生成 ${generated.files.length} 个文件`,
+        );
+
+        // 写入所有文件到工作区
+        const fileWriteResults = [];
+        for (const file of generated.files) {
+          const result = await toolGateway.mcp.callTool("write_file", {
+            path: file.path,
+            content: file.content,
+          });
+          fileWriteResults.push(result);
+          taskState.toolResults.push({ name: "write_file", result });
+
+          if (onChunk) {
+            onChunk({
+              type: "tool",
+              tool: "write_file",
+              summary: `创建文件: ${file.path}`,
+            });
+          }
+        }
+
+        recordPhase(taskState, "scaffold_complete", `项目骨架生成完成`);
+        taskState.status = "done";
+        taskState.summary = `已成功生成 ${generated.scaffoldInfo.templateName} 项目骨架，包含 ${generated.scaffoldInfo.fileCount} 个文件。项目名称：${generated.scaffoldInfo.projectName}`;
+
+        return createSuccessResponse({
+          status: "scaffold_ok",
+          scaffoldInfo: generated.scaffoldInfo,
+          files: generated.files.map((f) => ({ path: f.path })),
+          output: generated.summary,
+          taskState,
+        });
+      } catch (error: unknown) {
+        const message = error instanceof Error ? error.message : "未知错误";
+        recordPhase(taskState, "scaffold_error", message);
+        taskState.status = "failed";
+        return createSuccessResponse({
+          status: "scaffold_error",
+          error: message,
+          taskState,
+        });
+      }
+    },
+
+    /**
+     * 获取可用的模板列表
+     */
+    getTemplates() {
+      return templateGenerator.getTemplateList();
+    },
+
+    /**
+     * 获取指定类别的模板
+     */
+    getTemplatesByCategory(category: string) {
+      return templateGenerator.getTemplatesByCategory(category);
+    },
+
+    /**
+     * 获取单个模板的详细信息
+     */
+    getTemplateDetail(templateId: string) {
+      return templateGenerator.getTemplateDetail(templateId);
+    },
+
     async writeFile(path: string, content: string) {
-      return toolGateway.mcp.callTool('write_file', { path, content });
+      return toolGateway.mcp.callTool("write_file", { path, content });
     },
 
     async runCommand(command: string) {
-      return toolGateway.mcp.callTool('run_command', { command });
+      return toolGateway.mcp.callTool("run_command", { command });
     },
   };
 }

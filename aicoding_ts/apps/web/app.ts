@@ -550,7 +550,215 @@ function updateTreeEmptyState() {
   if (emptyState) emptyState.remove();
 }
 
-async function streamPreview(prompt: string) {
+/**
+ * 显示模板选择对话框
+ */
+async function showTemplateSelectionDialog() {
+  return new Promise<{ templateId: string; projectName: string } | null>(async (resolve) => {
+    // 获取可用的模板列表
+    const response = await fetch('/api/templates');
+    const { templates } = await response.json() as { templates: Array<{ id: string; name: string; description: string; category: string }> };
+
+    let dialog = document.querySelector<HTMLElement>('#templateSelectionDialog');
+    if (!dialog) {
+      dialog = document.createElement('div');
+      dialog.id = 'templateSelectionDialog';
+      dialog.className = 'tree-dialog-overlay';
+      document.body.appendChild(dialog);
+    }
+
+    // 按类别分组模板
+    const categories: Record<string, typeof templates> = {};
+    for (const template of templates) {
+      if (!categories[template.category]) {
+        categories[template.category] = [];
+      }
+      categories[template.category].push(template);
+    }
+
+    const categoryNames: Record<string, string> = {
+      frontend: '前端项目',
+      backend: '后端项目',
+      fullstack: '全栈项目',
+      api: 'API 服务',
+      cli: '命令行工具',
+    };
+
+    let templateHtml = '<div class="template-list">';
+    for (const [category, categoryTemplates] of Object.entries(categories)) {
+      templateHtml += `<div class="template-category">
+        <h4>${categoryNames[category] || category}</h4>
+        <div class="template-grid">`;
+      for (const template of categoryTemplates) {
+        templateHtml += `
+          <button type="button" class="template-card" data-template-id="${template.id}">
+            <span class="template-name">${template.name}</span>
+            <span class="template-description">${template.description}</span>
+          </button>`;
+      }
+      templateHtml += '</div></div>';
+    }
+    templateHtml += '</div>';
+
+    dialog.innerHTML = `
+      <div class="tree-dialog" style="max-width: 600px; max-height: 70vh; overflow-y: auto;">
+        <h3>选择项目模板</h3>
+        <p>选择一个模板快速开始新项目</p>
+        ${templateHtml}
+        <div class="tree-dialog-actions">
+          <button type="button" data-role="cancel">取消</button>
+        </div>
+      </div>
+    `;
+    dialog.classList.add('visible');
+
+    let selectedTemplate: string | null = null;
+
+    // 处理模板选择
+    dialog.querySelectorAll<HTMLButtonElement>('.template-card').forEach((button) => {
+      button.addEventListener('click', () => {
+        selectedTemplate = button.dataset.templateId || null;
+        if (selectedTemplate) {
+          // 进入项目名称输入
+          showProjectNameInputDialog(selectedTemplate).then((projectName) => {
+            dialog!.classList.remove('visible');
+            resolve(projectName ? { templateId: selectedTemplate!, projectName } : null);
+          });
+        }
+      });
+    });
+
+    // 处理取消
+    dialog.querySelector<HTMLButtonElement>('[data-role="cancel"]')!.addEventListener('click', () => {
+      dialog!.classList.remove('visible');
+      resolve(null);
+    });
+  });
+}
+
+/**
+ * 显示项目名称输入对话框
+ */
+function showProjectNameInputDialog(templateId: string): Promise<string | null> {
+  return new Promise<string | null>((resolve) => {
+    let dialog = document.querySelector<HTMLElement>('#projectNameInputDialog');
+    if (!dialog) {
+      dialog = document.createElement('div');
+      dialog.id = 'projectNameInputDialog';
+      dialog.className = 'tree-dialog-overlay';
+      dialog.innerHTML = `
+        <div class="tree-dialog">
+          <h3>创建项目</h3>
+          <p>请输入项目名称</p>
+          <input data-role="input" type="text" placeholder="例如: my-app, my-project" />
+          <div class="tree-dialog-actions">
+            <button type="button" data-role="cancel">取消</button>
+            <button type="button" data-role="confirm">创建</button>
+          </div>
+        </div>
+      `;
+      document.body.appendChild(dialog);
+    }
+
+    const input = dialog.querySelector<HTMLInputElement>('[data-role="input"]')!;
+    input.value = 'my-project';
+    dialog.classList.add('visible');
+    input.focus();
+    input.select();
+
+    const cleanup = () => {
+      dialog!.classList.remove('visible');
+    };
+
+    const handleConfirm = () => {
+      const value = input.value.trim();
+      cleanup();
+      resolve(value || null);
+    };
+
+    const handleCancel = () => {
+      cleanup();
+      resolve(null);
+    };
+
+    dialog.querySelector<HTMLButtonElement>('[data-role="confirm"]')!.onclick = handleConfirm;
+    dialog.querySelector<HTMLButtonElement>('[data-role="cancel"]')!.onclick = handleCancel;
+
+    input.addEventListener('keypress', (e) => {
+      if (e.key === 'Enter') handleConfirm();
+      if (e.key === 'Escape') handleCancel();
+    });
+  });
+}
+
+/**
+ * 流式生成项目骨架
+ */
+async function streamGenerateScaffold(projectName: string, templateId: string) {
+  const response = await fetch('/api/scaffold/generate', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ projectName, templateId }),
+  });
+
+  if (!response.ok || !response.body) {
+    throw new Error('项目生成请求失败');
+  }
+
+  const reader = response.body.getReader();
+  const decoder = new TextDecoder();
+  let buffer = '';
+  const assistantMessage = appendMessage('agent', '');
+  let finalResult: PreviewResult | null = null;
+  let generatedFileCount = 0;
+
+  const updateAssistant = (text: string) => {
+    assistantMessage.textContent = text;
+    chatLog.scrollTop = chatLog.scrollHeight;
+  };
+
+  while (true) {
+    const { value, done } = await reader.read();
+    if (done) break;
+
+    buffer += decoder.decode(value, { stream: true });
+    const parts = buffer.split('\n\n');
+    buffer = parts.pop() || '';
+
+    for (const part of parts) {
+      const line = part.split('\n').find((item) => item.startsWith('data: '));
+      if (!line) continue;
+      const payload = line.slice(6);
+      if (payload === '[DONE]') continue;
+
+      try {
+        const event = JSON.parse(payload) as
+          | ToolEvent
+          | { type: 'chunk'; chunk: string }
+          | { type: 'result'; result: PreviewResult }
+          | { type: 'error'; message: string };
+
+        if (event.type === 'chunk') {
+          updateAssistant((assistantMessage.textContent || '') + event.chunk);
+        } else if (event.type === 'tool') {
+          generatedFileCount++;
+          updateAssistant(`✓ 已生成 ${generatedFileCount} 个文件...\n\n${event.summary || '正在生成项目'}`);
+        } else if (event.type === 'result') {
+          finalResult = event.result;
+          updateAssistant(`✅ 项目骨架生成完成！\n\n${projectName} 项目已生成 ${generatedFileCount} 个文件。\n\n现在你可以开始编辑文件或继续输入需求来修改项目。`);
+          scheduleWorkspaceRefresh(200);
+        } else if (event.type === 'error') {
+          updateAssistant(`❌ 出错了：${event.message}`);
+        }
+      } catch (e) {
+        console.error('解析事件失败:', e);
+        continue;
+      }
+    }
+  }
+
+  return finalResult;
+}
   const response = await fetch('/api/agent/preview', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
@@ -696,4 +904,30 @@ applyLayoutWidths();
 initResizers();
 loadExpandedFolders();
 loadWorkspace();
-appendMessage('agent', 'MVP 已启动：你可以先浏览文件树，再输入一个需求开始。');
+
+// 添加模板生成按钮到新建菜单
+const newItemMenuElement = newItemMenu;
+if (newItemMenuElement) {
+  const scaffoldButton = document.createElement('button');
+  scaffoldButton.type = 'button';
+  scaffoldButton.textContent = '📦 生成项目模板';
+  scaffoldButton.style.borderTop = '1px solid #ccc';
+  scaffoldButton.style.marginTop = '8px';
+  scaffoldButton.style.paddingTop = '8px';
+  scaffoldButton.addEventListener('click', async () => {
+    hideNewItemMenu();
+    const result = await showTemplateSelectionDialog();
+    if (result) {
+      appendMessage('user', `生成 ${result.projectName} 项目（${result.templateId}）`);
+      appendMessage('agent', `正在生成 ${result.projectName} 项目骨架…`);
+      try {
+        await streamGenerateScaffold(result.projectName, result.templateId);
+      } catch (error) {
+        appendMessage('agent', `项目生成失败：${(error as Error).message}`);
+      }
+    }
+  });
+  newItemMenuElement.appendChild(scaffoldButton);
+}
+
+appendMessage('agent', 'MVP 已启动：选择"新建 > 📦 生成项目模板"来快速启动项目，或浏览文件树后输入需求开始。');
