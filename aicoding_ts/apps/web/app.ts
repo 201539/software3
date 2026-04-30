@@ -13,6 +13,12 @@ const waitingUserQuestion = document.querySelector<HTMLElement>('#waitingUserQue
 const waitingUserActions = document.querySelector<HTMLElement>('#waitingUserActions')!;
 const structuredSummary = document.querySelector<HTMLElement>('#structuredSummary')!;
 const toggleRawSummaryBtn = document.querySelector<HTMLButtonElement>('#toggleRawSummaryBtn')!;
+const failurePanel = document.querySelector<HTMLElement>('#failurePanel')!;
+const failureDetail = document.querySelector<HTMLElement>('#failureDetail')!;
+const clearFailureBtn = document.querySelector<HTMLButtonElement>('#clearFailureBtn')!;
+const statusTimeline = document.querySelector<HTMLElement>('#statusTimeline')!;
+const commandConfirmOverlay = document.querySelector<HTMLElement>('#commandConfirmOverlay')!;
+const commandConfirmCloseBtn = document.querySelector<HTMLButtonElement>('#commandConfirmCloseBtn')!;
 const refreshBtn = document.querySelector<HTMLButtonElement>('#refreshBtn')!;
 const workspaceLayout = document.querySelector<HTMLElement>('#workspaceLayout')!;
 const newItemBtn = document.querySelector<HTMLButtonElement>('#newItemBtn')!;
@@ -77,6 +83,10 @@ let lastTaskPhase: UiTaskPhase = 'idle';
 let lastTaskPhaseUpdatedAt = 0;
 let lastConfirmRequest: { confirmId: string; question: string; options?: string[] } | null = null;
 let showRawSummary = false;
+let lastFailureText: string | null = null;
+let statusHistory: Array<{ at: number; phase: UiTaskPhase; detail?: string }> = [];
+let lastRunCommandDetail: string | null = null;
+let shouldScrollTreeToActive = false;
 
 const layoutState = {
   chat: 34,
@@ -274,6 +284,9 @@ function setTaskPhase(phase: UiTaskPhase, detail?: string) {
   lastTaskPhaseUpdatedAt = Date.now();
   renderTaskStatusSteps(detail);
   renderWaitingUserPanel();
+  pushStatusHistory(phase, detail);
+  renderFailurePanel();
+  renderTimeline();
 }
 
 function renderTaskStatusSteps(detail?: string) {
@@ -296,6 +309,47 @@ function renderTaskStatusSteps(detail?: string) {
   if (detail) {
     retryLastTaskBtn.title = `${retryLastTaskBtn.title}\n${detail}`;
   }
+}
+
+function pushStatusHistory(phase: UiTaskPhase, detail?: string) {
+  statusHistory.push({ at: Date.now(), phase, detail });
+  if (statusHistory.length > 20) statusHistory = statusHistory.slice(-20);
+}
+
+function formatTime(ts: number): string {
+  const d = new Date(ts);
+  const hh = String(d.getHours()).padStart(2, '0');
+  const mm = String(d.getMinutes()).padStart(2, '0');
+  const ss = String(d.getSeconds()).padStart(2, '0');
+  return `${hh}:${mm}:${ss}`;
+}
+
+function renderTimeline() {
+  statusTimeline.innerHTML = '';
+  if (statusHistory.length === 0) {
+    const empty = document.createElement('div');
+    empty.className = 'timeline-item';
+    empty.innerHTML = `<div class="timeline-time">--:--:--</div><div class="timeline-msg">暂无状态记录</div>`;
+    statusTimeline.appendChild(empty);
+    return;
+  }
+  for (const item of statusHistory.slice().reverse()) {
+    const row = document.createElement('div');
+    row.className = 'timeline-item';
+    const detail = item.detail ? `\n${item.detail}` : '';
+    row.innerHTML = `<div class="timeline-time">${formatTime(item.at)}</div><div class="timeline-msg">${item.phase}${detail}</div>`;
+    statusTimeline.appendChild(row);
+  }
+}
+
+function renderFailurePanel() {
+  const visible = !!lastFailureText;
+  failurePanel.classList.toggle('hidden', !visible);
+  if (!visible) {
+    failureDetail.textContent = '';
+    return;
+  }
+  failureDetail.textContent = lastFailureText!;
 }
 
 function renderWaitingUserPanel() {
@@ -408,6 +462,24 @@ function renderStructuredSummary(result: PreviewResult | null) {
     return div;
   };
 
+  const mkFileLinks = (paths: string[]) => {
+    const outer = document.createElement('div');
+    outer.className = 'structured-value';
+    paths.forEach((p) => {
+      const a = document.createElement('a');
+      a.className = 'file-link';
+      a.textContent = p;
+      a.href = '#';
+      a.addEventListener('click', (e) => {
+        e.preventDefault();
+        openFile(p);
+      });
+      outer.appendChild(a);
+      outer.appendChild(document.createElement('br'));
+    });
+    return outer;
+  };
+
   const mkTags = (items: Array<{ text: string; kind?: 'ok' | 'warn' | 'err' }>) => {
     const list = document.createElement('div');
     list.className = 'structured-list';
@@ -436,7 +508,11 @@ function renderStructuredSummary(result: PreviewResult | null) {
   ]));
 
   if (changedFiles.size > 0) {
-    mkRow('变更文件', mkValue([...changedFiles].join('\n')));
+    mkRow('变更文件', mkFileLinks([...changedFiles]));
+  }
+
+  if (lastRunCommandDetail) {
+    mkRow('验证/命令输出', mkValue(lastRunCommandDetail));
   }
 
   if (typeof result.summary === 'string' && result.summary.trim()) {
@@ -1019,6 +1095,9 @@ function renderTree(nodes: WorkspaceNode[]) {
     const row = document.createElement('div');
     row.className = 'file-item';
     row.style.paddingLeft = `${12 + depth * 16}px`;
+    if (selectedFile && selectedFile === fullPath) {
+      row.classList.add('active');
+    }
 
     if (isFolder(node)) {
       const expanded = expandedFolders.has(fullPath);
@@ -1065,6 +1144,14 @@ function renderTree(nodes: WorkspaceNode[]) {
   };
 
   nodes.forEach((node) => renderNode(node, 0, ''));
+
+  if (shouldScrollTreeToActive) {
+    shouldScrollTreeToActive = false;
+    const active = fileTree.querySelector<HTMLElement>('.file-item.active');
+    if (active) {
+      active.scrollIntoView({ block: 'center', inline: 'nearest', behavior: 'smooth' });
+    }
+  }
 
   menu.querySelectorAll<HTMLButtonElement>('button').forEach((button) => {
     button.onclick = async () => {
@@ -1114,6 +1201,8 @@ async function openFile(path: string) {
     currentFileContent = file.content ?? '';
     editor.value = currentFileContent;
     setSaveState('saved');
+    shouldScrollTreeToActive = true;
+    renderTree(workspaceCache);
   } catch (err) {
     showToast({
       kind: 'error',
@@ -1367,6 +1456,9 @@ async function streamChat(prompt: string) {
           updateAssistant(accumulatedChunks);
         } else if (event.type === 'tool') {
           appendToolDetail(event.tool, `${event.summary || '工具调用结果'}\n\n${event.detail || ''}`);
+          if (event.tool === 'run_command') {
+            lastRunCommandDetail = `${event.summary || '命令执行'}\n\n${event.detail || ''}`.trim();
+          }
           if (event.tool === 'write_file') {
             sawWriteFileSuccess = true;
             scheduleWorkspaceRefresh(300);
@@ -1380,6 +1472,7 @@ async function streamChat(prompt: string) {
           updateAssistant(`出错了：${event.message}`);
           setAgentStatus('idle');
           setTaskPhase('failed', event.message);
+          lastFailureText = `任务失败：${event.message}`;
           renderStructuredSummary(finalResult);
         } else if (event.type === 'session') {
           currentSessionId = event.sessionId;
@@ -1406,6 +1499,9 @@ async function streamChat(prompt: string) {
             error: 'failed',
           };
           if (phaseMap[event.status]) setTaskPhase(phaseMap[event.status], `状态：${event.status}`);
+          if (event.status === 'error') {
+            lastFailureText = `任务失败：状态=error`;
+          }
         } else if (event.type === 'confirm_request') {
           setAgentStatus('waiting_confirm');
           setTaskPhase('waiting_user');
@@ -1440,6 +1536,8 @@ chatForm.addEventListener('submit', async (event) => {
   appendMessage('user', prompt);
   promptInput.value = '';
   setAgentStatus('running');
+  lastRunCommandDetail = null;
+  lastFailureText = null;
 
   try {
     const result = await streamChat(prompt);
@@ -1448,6 +1546,7 @@ chatForm.addEventListener('submit', async (event) => {
   } catch (error) {
     appendMessage('agent', `请求失败：${(error as Error).message}`);
     setTaskPhase('failed', (error as Error).message);
+    lastFailureText = `请求失败：${(error as Error).message}`;
     renderStructuredSummary(null);
     showToast({
       kind: 'error',
@@ -1476,6 +1575,16 @@ toggleRawSummaryBtn.addEventListener('click', () => {
   showRawSummary = !showRawSummary;
   summary.classList.toggle('hidden', !showRawSummary);
   toggleRawSummaryBtn.textContent = showRawSummary ? '隐藏原始' : '查看原始';
+});
+
+clearFailureBtn.addEventListener('click', () => {
+  lastFailureText = null;
+  renderFailurePanel();
+});
+
+commandConfirmCloseBtn.addEventListener('click', () => {
+  commandConfirmOverlay.classList.remove('visible');
+  commandConfirmOverlay.setAttribute('aria-hidden', 'true');
 });
 
 newSessionBtn.addEventListener('click', createNewSession);
@@ -1516,3 +1625,4 @@ setTaskPhase('idle');
 renderStructuredSummary(null);
 summary.classList.add('hidden');
 toggleRawSummaryBtn.textContent = '查看原始';
+renderTimeline();

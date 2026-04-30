@@ -98,16 +98,50 @@
           <div id="waitingUserQuestion" class="waiting-user-question"></div>
           <div id="waitingUserActions" class="waiting-user-actions"></div>
         </div>
+        <div id="failurePanel" class="failure-panel hidden" role="region" aria-label="失败信息">
+          <div class="failure-header">
+            <strong>失败信息</strong>
+            <button id="clearFailureBtn" type="button" class="ghost-button">清除</button>
+          </div>
+          <pre id="failureDetail" class="failure-detail"></pre>
+        </div>
+        <div class="status-timeline">
+          <div class="timeline-header">
+            <strong>状态流转</strong>
+            <span class="timeline-hint">最近 20 条</span>
+          </div>
+          <div id="statusTimeline" class="timeline-list" aria-label="状态流转列表"></div>
+        </div>
         <div class="summary-header">
           <strong>结构化摘要</strong>
           <button id="toggleRawSummaryBtn" type="button" class="ghost-button" title="切换原始 JSON 显示">查看原始</button>
         </div>
         <div id="structuredSummary" class="structured-summary"></div>
+        <div class="preview-panel">
+          <div class="preview-header">
+            <strong>预览（占位）</strong>
+            <span class="preview-hint">等待 Preview Runner 接入后启用</span>
+          </div>
+          <div class="preview-body">
+            <div class="preview-item"><span class="preview-key">预览 URL</span><span class="preview-val muted">未接入</span></div>
+            <div class="preview-item"><span class="preview-key">构建状态</span><span class="preview-val muted">未接入</span></div>
+            <div class="preview-item"><span class="preview-key">构建错误</span><span class="preview-val muted">未接入</span></div>
+          </div>
+        </div>
         <pre id="summary" class="summary-box"></pre>
       </section>
     </div>
 
     <div id="toastHost" class="toast-host" aria-live="polite" aria-atomic="true"></div>
+    <div id="commandConfirmOverlay" class="tree-dialog-overlay" aria-hidden="true">
+      <div class="tree-dialog">
+        <h3>命令执行确认（占位）</h3>
+        <p>后端接入风险分级后，此处将展示命令、cwd、风险等级与原因，并提供“允许一次/拒绝”等操作。</p>
+        <div class="tree-dialog-actions">
+          <button type="button" id="commandConfirmCloseBtn">关闭</button>
+        </div>
+      </div>
+    </div>
 
     <script type="module" src="/app.js"></script>
   </body>
