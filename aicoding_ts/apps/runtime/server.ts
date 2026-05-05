@@ -55,31 +55,33 @@ type SessionStore = ReturnType<typeof createSessionStore>;
 const CONFIRM_TIMEOUT_MS = 5 * 60 * 1000;
 
 const port = Number(process.env.PORT || 3000);
-const webRoot = join(process.cwd(), 'apps', 'web');
-const webDistRoot = join(webRoot, 'dist');
+const webRoot = join(process.cwd(), "apps", "web");
+const webDistRoot = join(webRoot, "dist");
 
 const mimeTypes: Record<string, string> = {
-  '.html': 'text/html; charset=utf-8',
-  '.css': 'text/css; charset=utf-8',
-  '.js': 'text/javascript; charset=utf-8',
-  '.json': 'application/json; charset=utf-8',
-  '.svg': 'image/svg+xml',
-  '.png': 'image/png',
+  ".html": "text/html; charset=utf-8",
+  ".css": "text/css; charset=utf-8",
+  ".js": "text/javascript; charset=utf-8",
+  ".json": "application/json; charset=utf-8",
+  ".svg": "image/svg+xml",
+  ".png": "image/png",
 };
 
 function sendJson(res: ServerResponse, statusCode: number, data: unknown) {
-  res.writeHead(statusCode, { 'Content-Type': 'application/json; charset=utf-8' });
+  res.writeHead(statusCode, {
+    "Content-Type": "application/json; charset=utf-8",
+  });
   res.end(JSON.stringify(data, null, 2));
 }
 
 async function parseBody<T>(req: IncomingMessage): Promise<T> {
   let body = '';
   await new Promise<void>((resolve, reject) => {
-    req.on('data', (chunk) => {
-      body += typeof chunk === 'string' ? chunk : chunk.toString('utf8');
+    req.on("data", (chunk) => {
+      body += typeof chunk === "string" ? chunk : chunk.toString("utf8");
     });
-    req.on('end', () => resolve());
-    req.on('error', (error) => reject(error));
+    req.on("end", () => resolve());
+    req.on("error", (error) => reject(error));
   });
   return (body ? JSON.parse(body) : {}) as T;
 }
@@ -204,9 +206,6 @@ export function startRuntimeServer() {
         res.end();
         return;
       }
-      sendJson(res, 200, response);
-      return;
-    }
 
     // ── GET /api/meta ──
     if (url.pathname === '/api/meta') {
@@ -327,38 +326,56 @@ export function startRuntimeServer() {
       return;
     }
 
-    if (url.pathname === '/api/mcp/resources') {
-      sendJson(res, 200, toolGateway.mcp.listResources());
-      return;
-    }
+      if (url.pathname === "/api/mcp/resources") {
+        sendJson(res, 200, toolGateway.mcp.listResources());
+        return;
+      }
 
-    if (url.pathname === '/api/mcp/prompts') {
-      sendJson(res, 200, toolGateway.mcp.listPrompts());
-      return;
-    }
+      if (url.pathname === "/api/mcp/prompts") {
+        sendJson(res, 200, toolGateway.mcp.listPrompts());
+        return;
+      }
 
-    if (url.pathname.startsWith('/api/mcp/tool/') && req.method === 'POST') {
-      const name = decodeURIComponent(url.pathname.replace('/api/mcp/tool/', ''));
-      const parsed = await parseBody<RequestContext>(req);
-      const result = await toolGateway.mcp.callTool(name, parsed as Record<string, unknown>);
-      sendJson(res, result.success ? 200 : 400, result);
-      return;
-    }
+      if (url.pathname.startsWith("/api/mcp/tool/") && req.method === "POST") {
+        const name = decodeURIComponent(
+          url.pathname.replace("/api/mcp/tool/", ""),
+        );
+        const parsed = await parseBody<RequestContext>(req);
+        const result = await toolGateway.mcp.callTool(
+          name,
+          parsed as Record<string, unknown>,
+        );
+        sendJson(res, result.success ? 200 : 400, result);
+        return;
+      }
 
-    if (url.pathname.startsWith('/api/mcp/resource/') && req.method === 'GET') {
-      const name = decodeURIComponent(url.pathname.replace('/api/mcp/resource/', ''));
-      const result = await toolGateway.mcp.readResource(name);
-      sendJson(res, result.success ? 200 : 404, result);
-      return;
-    }
+      if (
+        url.pathname.startsWith("/api/mcp/resource/") &&
+        req.method === "GET"
+      ) {
+        const name = decodeURIComponent(
+          url.pathname.replace("/api/mcp/resource/", ""),
+        );
+        const result = await toolGateway.mcp.readResource(name);
+        sendJson(res, result.success ? 200 : 404, result);
+        return;
+      }
 
-    if (url.pathname.startsWith('/api/mcp/prompt/') && req.method === 'POST') {
-      const name = decodeURIComponent(url.pathname.replace('/api/mcp/prompt/', ''));
-      const parsed = await parseBody<RequestContext>(req);
-      const result = await toolGateway.mcp.getPrompt(name, parsed as Record<string, unknown>);
-      sendJson(res, result.success ? 200 : 400, result);
-      return;
-    }
+      if (
+        url.pathname.startsWith("/api/mcp/prompt/") &&
+        req.method === "POST"
+      ) {
+        const name = decodeURIComponent(
+          url.pathname.replace("/api/mcp/prompt/", ""),
+        );
+        const parsed = await parseBody<RequestContext>(req);
+        const result = await toolGateway.mcp.getPrompt(
+          name,
+          parsed as Record<string, unknown>,
+        );
+        sendJson(res, result.success ? 200 : 400, result);
+        return;
+      }
 
     // ── GET /api/file/:path ──
     if (url.pathname.startsWith('/api/file/') && req.method === 'GET') {
@@ -381,14 +398,28 @@ export function startRuntimeServer() {
         content: parsed.content ?? '',
       });
 
-      if (!updated.success || !updated.data || typeof updated.data !== 'object') {
-        sendJson(res, 400, updated);
+        if (
+          !updated.success ||
+          !updated.data ||
+          typeof updated.data !== "object"
+        ) {
+          sendJson(res, 400, updated);
+          return;
+        }
+
+        sendJson(res, 200, {
+          ok: true,
+          ...(updated.data as Record<string, unknown>),
+        });
         return;
       }
 
-      sendJson(res, 200, { ok: true, ...(updated.data as Record<string, unknown>) });
-      return;
-    }
+      if (url.pathname === "/api/folder" && req.method === "PUT") {
+        const parsed = await parseBody<RequestContext>(req);
+        const created = await workspaceManager.createFolder(parsed.path ?? "");
+        sendJson(res, 200, created);
+        return;
+      }
 
     // ── PUT /api/folder ──
     if (url.pathname === '/api/folder' && req.method === 'PUT') {
@@ -494,30 +525,92 @@ export function startRuntimeServer() {
           }
           if (isAgentEvent(chunk)) writeEvent(chunk);
         });
-        writeEvent({ type: 'result', result });
-      } catch (error: unknown) {
-        writeEvent({ type: 'error', message: error instanceof Error ? error.message : 'Unknown error' });
+
+        const writeEvent = (event: PreviewEvent) => {
+          res.write(`data: ${JSON.stringify(event)}\n\n`);
+        };
+
+        try {
+          const projectParams = {
+            projectName: parsed.projectName ?? "my-project",
+            templateId: parsed.templateId ?? "vite-react-ts",
+            author: parsed.author,
+            description: parsed.description,
+          };
+
+          const result = await agentCore.generateScaffold(
+            projectParams,
+            (chunk) => {
+              if (isPreviewEvent(chunk)) {
+                writeEvent(chunk);
+              }
+            },
+          );
+          writeEvent({ type: "result", result });
+        } catch (error: unknown) {
+          writeEvent({
+            type: "error",
+            message: error instanceof Error ? error.message : "Unknown error",
+          });
+        }
+
+        res.write("data: [DONE]\n\n");
+        res.end();
+        return;
       }
 
-      res.write('data: [DONE]\n\n');
-      res.end();
-      return;
-    }
+      if (url.pathname === "/api/agent/preview" && req.method === "POST") {
+        const parsed = await parseBody<PreviewPayload>(req);
 
     // ── 静态文件 ──
     const pathname = url.pathname === '/' ? '/index.html' : url.pathname;
     const content = await tryReadStaticFile(pathname);
 
-    if (content) {
-      const type = mimeTypes[extname(pathname)] || 'application/octet-stream';
-      res.writeHead(200, { 'Content-Type': type });
-      res.end(content);
-      return;
-    }
+        const writeEvent = (event: PreviewEvent) => {
+          res.write(`data: ${JSON.stringify(event)}\n\n`);
+        };
 
-    res.writeHead(404, { 'Content-Type': 'text/plain; charset=utf-8' });
-    res.end('Not Found');
-  });
+        try {
+          const result = await agentCore.preview(
+            parsed.prompt ?? "",
+            parsed.selectedFile ?? null,
+            (chunk) => {
+              if (typeof chunk === "string") {
+                writeEvent({ type: "chunk", chunk });
+                return;
+              }
+              if (isPreviewEvent(chunk)) {
+                writeEvent(chunk);
+              }
+            },
+          );
+          writeEvent({ type: "result", result });
+        } catch (error: unknown) {
+          writeEvent({
+            type: "error",
+            message: error instanceof Error ? error.message : "Unknown error",
+          });
+        }
+
+        res.write("data: [DONE]\n\n");
+        res.end();
+        return;
+      }
+
+      const pathname = url.pathname === "/" ? "/index.html" : url.pathname;
+      const content = await tryReadStaticFile(pathname);
+
+      if (content) {
+        const type = mimeTypes[extname(pathname)] || "application/octet-stream";
+        res.writeHead(200, { "Content-Type": type });
+        res.end(content);
+        return;
+      }
+
+      res.writeHead(404, { "Content-Type": "text/plain; charset=utf-8" });
+      res.end("Not Found");
+    },
+  );
 
   server.listen(port, () => {
     console.log(`AI Coding Agent Web MVP running at http://localhost:${port}`);

@@ -106,6 +106,65 @@ export function startRuntimeServer() {
       return;
     }
 
+    if (url.pathname === '/api/templates' && req.method === 'GET') {
+      const templates = agentCore.getTemplates();
+      sendJson(res, 200, { templates });
+      return;
+    }
+
+    if (url.pathname.startsWith('/api/templates/category/') && req.method === 'GET') {
+      const category = decodeURIComponent(url.pathname.replace('/api/templates/category/', ''));
+      const templates = agentCore.getTemplatesByCategory(category);
+      sendJson(res, 200, { category, templates });
+      return;
+    }
+
+    if (url.pathname.startsWith('/api/templates/') && req.method === 'GET') {
+      const templateId = decodeURIComponent(url.pathname.replace('/api/templates/', ''));
+      const template = agentCore.getTemplateDetail(templateId);
+      if (!template) {
+        sendJson(res, 404, { error: '模板不存在' });
+        return;
+      }
+      sendJson(res, 200, template);
+      return;
+    }
+
+    if (url.pathname === '/api/scaffold/generate' && req.method === 'POST') {
+      let body = '';
+      for await (const chunk of req) body += chunk;
+      const parsed = body ? JSON.parse(body) : {};
+
+      res.writeHead(200, {
+        'Content-Type': 'text/event-stream; charset=utf-8',
+        'Cache-Control': 'no-cache, no-transform',
+        Connection: 'keep-alive',
+      });
+
+      const writeEvent = (event) => {
+        res.write(`data: ${JSON.stringify(event)}\n\n`);
+      };
+
+      try {
+        const projectParams = {
+          projectName: parsed.projectName ?? 'my-project',
+          templateId: parsed.templateId ?? 'vite-react-ts',
+          author: parsed.author,
+          description: parsed.description,
+        };
+        const result = await agentCore.generateScaffold(projectParams, (chunk) => {
+          writeEvent(chunk);
+        });
+        writeEvent({ type: 'result', result });
+      } catch (error) {
+        writeEvent({ type: 'error', message: error.message });
+      }
+
+      res.write('data: [DONE]\n\n');
+      res.end();
+      return;
+    }
+
     if (url.pathname === '/api/agent/preview' && req.method === 'POST') {
       let body = '';
       for await (const chunk of req) body += chunk;
