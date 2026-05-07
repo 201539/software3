@@ -206,6 +206,9 @@ export function startRuntimeServer() {
         res.end();
         return;
       }
+      sendJson(res, 200, response);
+      return;
+    }
 
     // ── GET /api/meta ──
     if (url.pathname === '/api/meta') {
@@ -526,91 +529,32 @@ export function startRuntimeServer() {
           if (isAgentEvent(chunk)) writeEvent(chunk);
         });
 
-        const writeEvent = (event: PreviewEvent) => {
-          res.write(`data: ${JSON.stringify(event)}\n\n`);
-        };
-
-        try {
-          const projectParams = {
-            projectName: parsed.projectName ?? "my-project",
-            templateId: parsed.templateId ?? "vite-react-ts",
-            author: parsed.author,
-            description: parsed.description,
-          };
-
-          const result = await agentCore.generateScaffold(
-            projectParams,
-            (chunk) => {
-              if (isPreviewEvent(chunk)) {
-                writeEvent(chunk);
-              }
-            },
-          );
-          writeEvent({ type: "result", result });
-        } catch (error: unknown) {
-          writeEvent({
-            type: "error",
-            message: error instanceof Error ? error.message : "Unknown error",
-          });
-        }
-
-        res.write("data: [DONE]\n\n");
-        res.end();
-        return;
+        writeEvent({ type: 'result', result });
+      } catch (error: unknown) {
+        writeEvent({
+          type: 'error',
+          message: error instanceof Error ? error.message : 'Unknown error',
+        });
       }
 
-      if (url.pathname === "/api/agent/preview" && req.method === "POST") {
-        const parsed = await parseBody<PreviewPayload>(req);
+      res.write('data: [DONE]\n\n');
+      res.end();
+      return;
+    }
 
-    // ── 静态文件 ──
-    const pathname = url.pathname === '/' ? '/index.html' : url.pathname;
+    const pathname = url.pathname === "/" ? "/index.html" : url.pathname;
     const content = await tryReadStaticFile(pathname);
 
-        const writeEvent = (event: PreviewEvent) => {
-          res.write(`data: ${JSON.stringify(event)}\n\n`);
-        };
+    if (content) {
+      const type = mimeTypes[extname(pathname)] || "application/octet-stream";
+      res.writeHead(200, { "Content-Type": type });
+      res.end(content);
+      return;
+    }
 
-        try {
-          const result = await agentCore.preview(
-            parsed.prompt ?? "",
-            parsed.selectedFile ?? null,
-            (chunk) => {
-              if (typeof chunk === "string") {
-                writeEvent({ type: "chunk", chunk });
-                return;
-              }
-              if (isPreviewEvent(chunk)) {
-                writeEvent(chunk);
-              }
-            },
-          );
-          writeEvent({ type: "result", result });
-        } catch (error: unknown) {
-          writeEvent({
-            type: "error",
-            message: error instanceof Error ? error.message : "Unknown error",
-          });
-        }
-
-        res.write("data: [DONE]\n\n");
-        res.end();
-        return;
-      }
-
-      const pathname = url.pathname === "/" ? "/index.html" : url.pathname;
-      const content = await tryReadStaticFile(pathname);
-
-      if (content) {
-        const type = mimeTypes[extname(pathname)] || "application/octet-stream";
-        res.writeHead(200, { "Content-Type": type });
-        res.end(content);
-        return;
-      }
-
-      res.writeHead(404, { "Content-Type": "text/plain; charset=utf-8" });
-      res.end("Not Found");
-    },
-  );
+    res.writeHead(404, { "Content-Type": "text/plain; charset=utf-8" });
+    res.end("Not Found");
+  });
 
   server.listen(port, () => {
     console.log(`AI Coding Agent Web MVP running at http://localhost:${port}`);

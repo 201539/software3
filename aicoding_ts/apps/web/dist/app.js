@@ -5,7 +5,21 @@ const promptInput = document.querySelector('#promptInput');
 const fileTree = document.querySelector('#fileTree');
 const editor = document.querySelector('#editor');
 const currentFile = document.querySelector('#currentFile');
+const editorSaveBadge = document.querySelector('#editorSaveBadge');
 const summary = document.querySelector('#summary');
+const taskStatusSteps = document.querySelector('#taskStatusSteps');
+const retryLastTaskBtn = document.querySelector('#retryLastTaskBtn');
+const waitingUserPanel = document.querySelector('#waitingUserPanel');
+const waitingUserQuestion = document.querySelector('#waitingUserQuestion');
+const waitingUserActions = document.querySelector('#waitingUserActions');
+const structuredSummary = document.querySelector('#structuredSummary');
+const toggleRawSummaryBtn = document.querySelector('#toggleRawSummaryBtn');
+const failurePanel = document.querySelector('#failurePanel');
+const failureDetail = document.querySelector('#failureDetail');
+const clearFailureBtn = document.querySelector('#clearFailureBtn');
+const statusTimeline = document.querySelector('#statusTimeline');
+const commandConfirmOverlay = document.querySelector('#commandConfirmOverlay');
+const commandConfirmCloseBtn = document.querySelector('#commandConfirmCloseBtn');
 const refreshBtn = document.querySelector('#refreshBtn');
 const workspaceLayout = document.querySelector('#workspaceLayout');
 const newItemBtn = document.querySelector('#newItemBtn');
@@ -26,6 +40,17 @@ let editorSaveTimer = null;
 let expandedFolders = new Set();
 let currentSessionId = null;
 let agentStatus = 'idle';
+let saveState = 'idle';
+let lastSaveError = null;
+let lastUserPrompt = null;
+let lastTaskPhase = 'idle';
+let lastTaskPhaseUpdatedAt = 0;
+let lastConfirmRequest = null;
+let showRawSummary = false;
+let lastFailureText = null;
+let statusHistory = [];
+let lastRunCommandDetail = null;
+let shouldScrollTreeToActive = false;
 const layoutState = {
     chat: 34,
     editor: 40,
@@ -134,6 +159,314 @@ function loadExpandedFolders() {
 function persistExpandedFolders() {
     localStorage.setItem('expandedFolders', JSON.stringify([...expandedFolders]));
 }
+function toastHost() {
+    const host = document.querySelector('#toastHost');
+    if (!host)
+        throw new Error('toastHost not found');
+    return host;
+}
+function showToast(opts) {
+    const host = toastHost();
+    const node = document.createElement('div');
+    node.className = `toast ${opts.kind}`;
+    node.innerHTML = `
+    <div>
+      <p class="toast-title"></p>
+      <p class="toast-msg"></p>
+    </div>
+    <div class="toast-actions">
+      ${opts.actionLabel ? `<button type="button" class="ghost-button toast-action"></button>` : ''}
+      <button type="button" class="toast-close" aria-label="关闭">关闭</button>
+    </div>
+  `;
+    node.querySelector('.toast-title').textContent = opts.title;
+    node.querySelector('.toast-msg').textContent = opts.message;
+    const close = () => node.remove();
+    node.querySelector('.toast-close').addEventListener('click', close);
+    const actionBtn = node.querySelector('.toast-action');
+    if (actionBtn && opts.actionLabel) {
+        actionBtn.textContent = opts.actionLabel;
+        actionBtn.addEventListener('click', () => {
+            try {
+                opts.onAction?.();
+            }
+            finally {
+                close();
+            }
+        });
+    }
+    host.appendChild(node);
+    const timeout = opts.timeoutMs ?? (opts.kind === 'error' ? 8000 : 4500);
+    window.setTimeout(() => {
+        if (node.isConnected)
+            close();
+    }, timeout);
+}
+function setSaveState(next, detail) {
+    saveState = next;
+    editorSaveBadge.dataset.state = next;
+    const labels = {
+        idle: '未打开',
+        saved: '已保存',
+        dirty: '未保存',
+        saving: '保存中…',
+        error: '保存失败',
+    };
+    editorSaveBadge.textContent = labels[next];
+    if (next === 'idle') {
+        editorSaveBadge.title = '未打开文件';
+        lastSaveError = null;
+    }
+    else if (next === 'error') {
+        lastSaveError = detail ?? lastSaveError ?? '未知错误';
+        editorSaveBadge.title = lastSaveError;
+    }
+    else {
+        editorSaveBadge.title = detail ?? editorSaveBadge.textContent ?? '';
+        lastSaveError = null;
+    }
+}
+const TASK_PHASES = [
+    { key: 'planning', label: '规划' },
+    { key: 'context_loading', label: '加载上下文' },
+    { key: 'editing', label: '修改文件' },
+    { key: 'validating', label: '验证' },
+    { key: 'waiting_user', label: '等待确认' },
+    { key: 'succeeded', label: '完成' },
+];
+function setTaskPhase(phase, detail) {
+    lastTaskPhase = phase;
+    lastTaskPhaseUpdatedAt = Date.now();
+    renderTaskStatusSteps(detail);
+    renderWaitingUserPanel();
+    pushStatusHistory(phase, detail);
+    renderFailurePanel();
+    renderTimeline();
+}
+function renderTaskStatusSteps(detail) {
+    const phaseIndex = TASK_PHASES.findIndex((p) => p.key === lastTaskPhase);
+    taskStatusSteps.innerHTML = '';
+    TASK_PHASES.forEach((p, idx) => {
+        const pill = document.createElement('span');
+        pill.className = 'step-pill';
+        pill.textContent = p.label;
+        if (lastTaskPhase === 'failed') {
+            if (idx === 0)
+                pill.classList.add('error');
+        }
+        else if (phaseIndex >= 0) {
+            if (idx < phaseIndex)
+                pill.classList.add('done');
+            if (idx === phaseIndex)
+                pill.classList.add('active');
+        }
+        taskStatusSteps.appendChild(pill);
+    });
+    retryLastTaskBtn.disabled = !lastUserPrompt || agentStatus !== 'idle';
+    retryLastTaskBtn.title = lastUserPrompt ? `重试：${lastUserPrompt}` : '暂无可重试任务';
+    if (detail) {
+        retryLastTaskBtn.title = `${retryLastTaskBtn.title}\n${detail}`;
+    }
+}
+function pushStatusHistory(phase, detail) {
+    statusHistory.push({ at: Date.now(), phase, detail });
+    if (statusHistory.length > 20)
+        statusHistory = statusHistory.slice(-20);
+}
+function formatTime(ts) {
+    const d = new Date(ts);
+    const hh = String(d.getHours()).padStart(2, '0');
+    const mm = String(d.getMinutes()).padStart(2, '0');
+    const ss = String(d.getSeconds()).padStart(2, '0');
+    return `${hh}:${mm}:${ss}`;
+}
+function renderTimeline() {
+    statusTimeline.innerHTML = '';
+    if (statusHistory.length === 0) {
+        const empty = document.createElement('div');
+        empty.className = 'timeline-item';
+        empty.innerHTML = `<div class="timeline-time">--:--:--</div><div class="timeline-msg">暂无状态记录</div>`;
+        statusTimeline.appendChild(empty);
+        return;
+    }
+    for (const item of statusHistory.slice().reverse()) {
+        const row = document.createElement('div');
+        row.className = 'timeline-item';
+        const detail = item.detail ? `\n${item.detail}` : '';
+        row.innerHTML = `<div class="timeline-time">${formatTime(item.at)}</div><div class="timeline-msg">${item.phase}${detail}</div>`;
+        statusTimeline.appendChild(row);
+    }
+}
+function renderFailurePanel() {
+    const visible = !!lastFailureText;
+    failurePanel.classList.toggle('hidden', !visible);
+    if (!visible) {
+        failureDetail.textContent = '';
+        return;
+    }
+    failureDetail.textContent = lastFailureText;
+}
+function renderWaitingUserPanel() {
+    const visible = lastTaskPhase === 'waiting_user' && !!lastConfirmRequest;
+    waitingUserPanel.classList.toggle('hidden', !visible);
+    if (!visible) {
+        waitingUserQuestion.textContent = '';
+        waitingUserActions.innerHTML = '';
+        return;
+    }
+    waitingUserQuestion.textContent = lastConfirmRequest.question;
+    waitingUserActions.innerHTML = '';
+    const confirmId = lastConfirmRequest.confirmId;
+    const options = lastConfirmRequest.options ?? [];
+    const submit = async (answer) => {
+        const trimmed = answer.trim();
+        if (!trimmed) {
+            showToast({ kind: 'warn', title: '请输入确认内容', message: '回答不能为空。' });
+            return;
+        }
+        try {
+            await fetch('/api/agent/confirm', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ confirmId, answer: trimmed }),
+            });
+            showToast({ kind: 'info', title: '已提交确认', message: trimmed });
+            lastConfirmRequest = null;
+            if (agentStatus === 'waiting_confirm')
+                setAgentStatus('running');
+            setTaskPhase('planning', '已提交确认，等待继续执行');
+        }
+        catch (err) {
+            showToast({ kind: 'error', title: '提交确认失败', message: err.message });
+        }
+    };
+    if (options.length > 0) {
+        options.forEach((opt) => {
+            const btn = document.createElement('button');
+            btn.type = 'button';
+            btn.className = 'confirm-option-btn';
+            btn.textContent = opt;
+            btn.addEventListener('click', () => submit(opt));
+            waitingUserActions.appendChild(btn);
+        });
+        return;
+    }
+    const input = document.createElement('input');
+    input.type = 'text';
+    input.placeholder = '输入你的确认/补充信息…';
+    input.addEventListener('keydown', (e) => {
+        if (e.key === 'Enter') {
+            e.preventDefault();
+            submit(input.value);
+        }
+    });
+    const btn = document.createElement('button');
+    btn.type = 'button';
+    btn.className = 'confirm-submit-btn';
+    btn.textContent = '提交';
+    btn.addEventListener('click', () => submit(input.value));
+    waitingUserActions.appendChild(input);
+    waitingUserActions.appendChild(btn);
+}
+function normalizeToolResults(result) {
+    if (!result)
+        return [];
+    const raw = result.toolResults ?? result.data?.toolResults ?? [];
+    return raw.map((item) => ({
+        name: item.name,
+        ok: item.result?.ok,
+        file: item.result?.file,
+    }));
+}
+function renderStructuredSummary(result) {
+    const toolResults = normalizeToolResults(result);
+    const changedFiles = new Set();
+    for (const t of toolResults) {
+        const file = t.file;
+        if (file?.path)
+            changedFiles.add(file.path);
+    }
+    (result?.changedFiles ?? []).forEach((p) => changedFiles.add(p));
+    const writeOk = toolResults.some((t) => t.name === 'write_file' && t.ok);
+    const commandOk = toolResults.some((t) => t.name === 'run_command' && t.ok);
+    const hasErrors = lastTaskPhase === 'failed';
+    structuredSummary.innerHTML = '';
+    const mkRow = (key, valueNode) => {
+        const wrapper = document.createElement('div');
+        wrapper.className = 'structured-row';
+        const k = document.createElement('div');
+        k.className = 'structured-key';
+        k.textContent = key;
+        wrapper.appendChild(k);
+        wrapper.appendChild(valueNode);
+        structuredSummary.appendChild(wrapper);
+    };
+    const mkValue = (text) => {
+        const div = document.createElement('div');
+        div.className = 'structured-value';
+        div.textContent = text;
+        return div;
+    };
+    const mkFileLinks = (paths) => {
+        const outer = document.createElement('div');
+        outer.className = 'structured-value';
+        paths.forEach((p) => {
+            const a = document.createElement('a');
+            a.className = 'file-link';
+            a.textContent = p;
+            a.href = '#';
+            a.addEventListener('click', (e) => {
+                e.preventDefault();
+                openFile(p);
+            });
+            outer.appendChild(a);
+            outer.appendChild(document.createElement('br'));
+        });
+        return outer;
+    };
+    const mkTags = (items) => {
+        const list = document.createElement('div');
+        list.className = 'structured-list';
+        items.forEach((it) => {
+            const tag = document.createElement('span');
+            tag.className = `tag${it.kind ? ` ${it.kind}` : ''}`;
+            tag.textContent = it.text;
+            list.appendChild(tag);
+        });
+        const outer = document.createElement('div');
+        outer.className = 'structured-value';
+        outer.appendChild(list);
+        return outer;
+    };
+    if (!result) {
+        mkRow('状态', mkValue('暂无摘要（等待任务运行）。'));
+        return;
+    }
+    mkRow('当前阶段', mkValue(lastTaskPhase));
+    mkRow('结果概览', mkTags([
+        { text: writeOk ? '文件已写入' : '未写入文件', kind: writeOk ? 'ok' : 'warn' },
+        { text: commandOk ? '命令已执行' : '未执行命令', kind: commandOk ? 'ok' : 'warn' },
+        { text: hasErrors ? '存在错误' : '无错误', kind: hasErrors ? 'err' : 'ok' },
+    ]));
+    if (changedFiles.size > 0) {
+        mkRow('变更文件', mkFileLinks([...changedFiles]));
+    }
+    if (lastRunCommandDetail) {
+        mkRow('验证/命令输出', mkValue(lastRunCommandDetail));
+    }
+    if (typeof result.summary === 'string' && result.summary.trim()) {
+        mkRow('摘要', mkValue(result.summary.trim()));
+    }
+    else if (typeof result.output === 'string' && result.output.trim()) {
+        mkRow('输出', mkValue(result.output.trim()));
+    }
+    if (toolResults.length > 0) {
+        const brief = toolResults
+            .map((t) => `${t.name}${t.ok === undefined ? '' : t.ok ? ' ✅' : ' ❌'}`)
+            .join(' / ');
+        mkRow('工具调用', mkValue(brief));
+    }
+}
 // ── 工作区历史记录 ──
 const WORKSPACE_HISTORY_KEY = 'workspaceHistory';
 const WORKSPACE_HISTORY_MAX = 10;
@@ -187,6 +520,7 @@ async function fetchSuggestions(prefix) {
         return data.suggestions ?? [];
     }
     catch {
+        showToast({ kind: 'warn', title: '路径补全失败', message: '无法获取路径建议，请检查后端是否运行。' });
         return [];
     }
 }
@@ -274,6 +608,7 @@ loadWorkspaceBtn.addEventListener('click', async () => {
         const data = await res.json();
         if (!data.ok) {
             setWorkspaceError(data.error ?? '加载失败');
+            showToast({ kind: 'error', title: '加载工作区失败', message: data.error ?? '未知错误' });
             return;
         }
         saveWorkspaceHistory(path);
@@ -290,9 +625,11 @@ loadWorkspaceBtn.addEventListener('click', async () => {
         editor.value = '';
         currentFileContent = '';
         appendMessage('agent', `已加载工作区：${path}`);
+        showToast({ kind: 'info', title: '工作区已加载', message: path });
     }
     catch (err) {
         setWorkspaceError(`请求失败：${err.message}`);
+        showToast({ kind: 'error', title: '加载工作区失败', message: err.message });
     }
     finally {
         loadWorkspaceBtn.disabled = false;
@@ -311,6 +648,7 @@ function setAgentStatus(status) {
     const submitBtn = chatForm.querySelector('button[type="submit"]');
     submitBtn.disabled = status !== 'idle';
     promptInput.disabled = status !== 'idle';
+    renderTaskStatusSteps();
 }
 function renderMarkdown(text) {
     return text
@@ -385,6 +723,10 @@ async function submitConfirm(confirmId, answer, card) {
         const actionsEl = card.querySelector('.confirm-actions');
         if (actionsEl) {
             actionsEl.innerHTML = `<span class="confirm-answer">已回答：${answer}</span>`;
+        }
+        if (lastConfirmRequest?.confirmId === confirmId) {
+            lastConfirmRequest = null;
+            renderWaitingUserPanel();
         }
     }
     catch {
@@ -519,21 +861,37 @@ function saveCurrentFile() {
     if (!selectedFile)
         return;
     const content = editor.value;
-    if (content === currentFileContent)
+    if (content === currentFileContent) {
+        if (saveState !== 'saved')
+            setSaveState('saved');
         return;
+    }
+    if (saveState !== 'saving')
+        setSaveState('dirty');
     if (editorSaveTimer)
         clearTimeout(editorSaveTimer);
     editorSaveTimer = setTimeout(async () => {
-        const res = await fetch('/api/file', {
-            method: 'PUT',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ path: selectedFile, content: editor.value }),
-        });
-        const data = await res.json();
-        currentFileContent = editor.value;
-        workspaceCache = data.tree || workspaceCache;
-        renderTree(workspaceCache);
-        scheduleWorkspaceRefresh(0);
+        try {
+            setSaveState('saving');
+            const res = await fetch('/api/file', {
+                method: 'PUT',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ path: selectedFile, content: editor.value }),
+            });
+            const data = await res.json();
+            if (!res.ok || data.ok === false) {
+                throw new Error(data.error || `HTTP ${res.status}`);
+            }
+            currentFileContent = editor.value;
+            workspaceCache = data.tree || workspaceCache;
+            renderTree(workspaceCache);
+            scheduleWorkspaceRefresh(0);
+            setSaveState('saved');
+        }
+        catch (err) {
+            setSaveState('error', err.message);
+            appendMessage('agent', `保存失败：${err.message}`);
+        }
     }, 300);
 }
 function showCreateNameDialog(kind) {
@@ -656,6 +1014,9 @@ function renderTree(nodes) {
         const row = document.createElement('div');
         row.className = 'file-item';
         row.style.paddingLeft = `${12 + depth * 16}px`;
+        if (selectedFile && selectedFile === fullPath) {
+            row.classList.add('active');
+        }
         if (isFolder(node)) {
             const expanded = expandedFolders.has(fullPath);
             const arrow = expanded ? '▾' : '▸';
@@ -699,6 +1060,13 @@ function renderTree(nodes) {
         fileTree.appendChild(row);
     };
     nodes.forEach((node) => renderNode(node, 0, ''));
+    if (shouldScrollTreeToActive) {
+        shouldScrollTreeToActive = false;
+        const active = fileTree.querySelector('.file-item.active');
+        if (active) {
+            active.scrollIntoView({ block: 'center', inline: 'nearest', behavior: 'smooth' });
+        }
+    }
     menu.querySelectorAll('button').forEach((button) => {
         button.onclick = async () => {
             const action = button.dataset.action;
@@ -737,131 +1105,232 @@ function scheduleWorkspaceRefresh(delayMs = 0) {
     }, delayMs);
 }
 async function openFile(path) {
-    const res = await fetch(`/api/file/${encodeURIComponent(path)}`);
-    const file = await res.json();
-    selectedFile = path;
-    currentFile.textContent = path;
-    currentFileContent = file.content ?? '';
-    editor.value = currentFileContent;
+    try {
+        const res = await fetch(`/api/file/${encodeURIComponent(path)}`);
+        if (!res.ok)
+            throw new Error(`HTTP ${res.status}`);
+        const file = await res.json();
+        selectedFile = path;
+        currentFile.textContent = path;
+        currentFileContent = file.content ?? '';
+        editor.value = currentFileContent;
+        setSaveState('saved');
+        shouldScrollTreeToActive = true;
+        renderTree(workspaceCache);
+    }
+    catch (err) {
+        showToast({
+            kind: 'error',
+            title: '打开文件失败',
+            message: `${path}\n${err.message}`,
+            actionLabel: '重试',
+            onAction: () => openFile(path),
+        });
+    }
 }
 function updateTreeEmptyState() {
     const emptyState = document.querySelector('#treeEmptyState');
     if (emptyState)
         emptyState.remove();
 }
-async function initSession() {
-    try {
-        const res = await fetch('/api/session');
-        const data = await res.json();
-        currentSessionId = data.sessionId;
-        const shortId = data.sessionId.replace('session-', '').slice(-6);
-        sessionBadge.textContent = `会话 #${shortId}`;
-        if (data.taskSummaries && data.taskSummaries.length > 0) {
-            appendMessage('agent', `恢复会话 — 历史任务 ${data.taskSummaries.length} 条。最近：${data.taskSummaries[data.taskSummaries.length - 1].prompt}`);
-        }
-    }
-    catch {
-        sessionBadge.textContent = '会话加载失败';
-    }
-}
-function formatRelativeTime(iso) {
-    const diff = Date.now() - new Date(iso).getTime();
-    const m = Math.floor(diff / 60000);
-    if (m < 1)
-        return '刚刚';
-    if (m < 60)
-        return `${m} 分钟前`;
-    const h = Math.floor(m / 60);
-    if (h < 24)
-        return `${h} 小时前`;
-    return `${Math.floor(h / 24)} 天前`;
-}
-function hideSessionDropdown() {
-    sessionDropdown.classList.remove('visible');
-    sessionDropdown.setAttribute('aria-hidden', 'true');
-}
-async function renderSessionDropdown() {
-    const res = await fetch('/api/sessions');
-    const data = await res.json();
-    const sessions = data.sessions;
-    sessionDropdown.innerHTML = '';
-    if (sessions.length === 0) {
-        const empty = document.createElement('div');
-        empty.style.cssText = 'padding:12px;color:var(--muted);font-size:13px;text-align:center';
-        empty.textContent = '暂无历史会话';
-        sessionDropdown.appendChild(empty);
-    }
-    else {
-        sessions.forEach((s) => {
-            const shortId = s.sessionId.replace('session-', '').slice(-6);
-            const item = document.createElement('div');
-            item.className = 'session-item' + (s.sessionId === currentSessionId ? ' active' : '');
-            item.innerHTML = `
-        <div class="session-item-header">
-          <span class="session-item-id">#${shortId}</span>
-          <span class="session-item-time">${formatRelativeTime(s.updatedAt)}</span>
+/**
+ * 显示模板选择对话框
+ */
+async function showTemplateSelectionDialog() {
+    return new Promise(async (resolve) => {
+        try {
+            // 获取可用的模板列表
+            const response = await fetch('/api/templates');
+            const { templates } = await response.json();
+            let dialog = document.querySelector('#templateSelectionDialog');
+            if (!dialog) {
+                dialog = document.createElement('div');
+                dialog.id = 'templateSelectionDialog';
+                dialog.className = 'tree-dialog-overlay';
+                document.body.appendChild(dialog);
+            }
+            // 按类别分组模板
+            const categories = {};
+            for (const template of templates) {
+                if (!categories[template.category]) {
+                    categories[template.category] = [];
+                }
+                categories[template.category].push(template);
+            }
+            const categoryNames = {
+                frontend: '前端项目',
+                backend: '后端项目',
+                fullstack: '全栈项目',
+                api: 'API 服务',
+                cli: '命令行工具',
+            };
+            let templateHtml = '<div class="template-list">';
+            for (const [category, categoryTemplates] of Object.entries(categories)) {
+                templateHtml += `<div class="template-category">
+          <h4>${categoryNames[category] || category}</h4>
+          <div class="template-grid">`;
+                for (const template of categoryTemplates) {
+                    templateHtml += `
+            <button type="button" class="template-card" data-template-id="${template.id}">
+              <span class="template-name">${template.name}</span>
+              <span class="template-description">${template.description}</span>
+            </button>`;
+                }
+                templateHtml += '</div></div>';
+            }
+            templateHtml += '</div>';
+            dialog.innerHTML = `
+        <div class="tree-dialog" style="max-width: 600px; max-height: 70vh; overflow-y: auto;">
+          <h3>选择项目模板</h3>
+          <p>选择一个模板快速开始新项目</p>
+          ${templateHtml}
+          <div class="tree-dialog-actions">
+            <button type="button" data-role="cancel">取消</button>
+          </div>
         </div>
-        ${s.lastMessage ? `<div class="session-item-preview">${s.lastMessage}</div>` : ''}
-        <div class="session-item-meta">${s.taskCount} 个任务</div>
       `;
-            item.addEventListener('mousedown', async (e) => {
-                e.preventDefault();
-                hideSessionDropdown();
-                if (s.sessionId === currentSessionId)
-                    return;
-                await switchToSession(s.sessionId);
+            dialog.classList.add('visible');
+            let selectedTemplate = null;
+            // 处理模板选择
+            dialog.querySelectorAll('.template-card').forEach((button) => {
+                button.addEventListener('click', () => {
+                    selectedTemplate = button.dataset.templateId || null;
+                    if (selectedTemplate) {
+                        // 进入项目名称输入
+                        showProjectNameInputDialog(selectedTemplate).then((projectName) => {
+                            dialog.classList.remove('visible');
+                            resolve(projectName ? { templateId: selectedTemplate, projectName } : null);
+                        });
+                    }
+                });
             });
-            sessionDropdown.appendChild(item);
-        });
-    }
-    sessionDropdown.classList.add('visible');
-    sessionDropdown.setAttribute('aria-hidden', 'false');
+            // 处理取消
+            dialog.querySelector('[data-role="cancel"]').addEventListener('click', () => {
+                dialog.classList.remove('visible');
+                resolve(null);
+            });
+        }
+        catch {
+            sessionBadge.textContent = '会话加载失败';
+            showToast({ kind: 'warn', title: '会话加载失败', message: '无法获取会话信息，后端可能未启动。' });
+            resolve(null);
+        }
+    });
 }
-async function switchToSession(sessionId) {
-    const res = await fetch('/api/session/switch', {
+/**
+ * 显示项目名称输入对话框
+ */
+function showProjectNameInputDialog(templateId) {
+    return new Promise((resolve) => {
+        let dialog = document.querySelector('#projectNameInputDialog');
+        if (!dialog) {
+            dialog = document.createElement('div');
+            dialog.id = 'projectNameInputDialog';
+            dialog.className = 'tree-dialog-overlay';
+            dialog.innerHTML = `
+        <div class="tree-dialog">
+          <h3>创建项目</h3>
+          <p>请输入项目名称</p>
+          <input data-role="input" type="text" placeholder="例如: my-app, my-project" />
+          <div class="tree-dialog-actions">
+            <button type="button" data-role="cancel">取消</button>
+            <button type="button" data-role="confirm">创建</button>
+          </div>
+        </div>
+      `;
+            document.body.appendChild(dialog);
+        }
+        const input = dialog.querySelector('[data-role="input"]');
+        input.value = 'my-project';
+        dialog.classList.add('visible');
+        input.focus();
+        input.select();
+        const cleanup = () => {
+            dialog.classList.remove('visible');
+        };
+        const handleConfirm = () => {
+            const value = input.value.trim();
+            cleanup();
+            resolve(value || null);
+        };
+        const handleCancel = () => {
+            cleanup();
+            resolve(null);
+        };
+        dialog.querySelector('[data-role="confirm"]').onclick = handleConfirm;
+        dialog.querySelector('[data-role="cancel"]').onclick = handleCancel;
+        input.addEventListener('keypress', (e) => {
+            if (e.key === 'Enter')
+                handleConfirm();
+            if (e.key === 'Escape')
+                handleCancel();
+        });
+    });
+}
+/**
+ * 流式生成项目骨架
+ */
+async function streamGenerateScaffold(projectName, templateId) {
+    const response = await fetch('/api/scaffold/generate', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ sessionId }),
+        body: JSON.stringify({ projectName, templateId }),
     });
-    if (!res.ok)
-        return;
-    const session = await res.json();
-    currentSessionId = session.sessionId;
-    const shortId = session.sessionId.replace('session-', '').slice(-6);
-    sessionBadge.textContent = `会话 #${shortId}`;
-    // 还原完整对话
-    chatLog.innerHTML = '';
-    for (const msg of session.messages) {
-        if (msg.role === 'user' && typeof msg.content === 'string') {
-            appendMessage('user', msg.content);
-        }
-        else if (msg.role === 'assistant' && typeof msg.content === 'string' && msg.content) {
-            appendMessage('agent', msg.content);
+    if (!response.ok || !response.body) {
+        throw new Error('项目生成请求失败');
+    }
+    const reader = response.body.getReader();
+    const decoder = new TextDecoder();
+    let buffer = '';
+    const assistantMessage = appendMessage('agent', '');
+    let finalResult = null;
+    let generatedFileCount = 0;
+    const updateAssistant = (text) => {
+        assistantMessage.textContent = text;
+        chatLog.scrollTop = chatLog.scrollHeight;
+    };
+    while (true) {
+        const { value, done } = await reader.read();
+        if (done)
+            break;
+        buffer += decoder.decode(value, { stream: true });
+        const parts = buffer.split('\n\n');
+        buffer = parts.pop() || '';
+        for (const part of parts) {
+            const line = part.split('\n').find((item) => item.startsWith('data: '));
+            if (!line)
+                continue;
+            const payload = line.slice(6);
+            if (payload === '[DONE]')
+                continue;
+            try {
+                const event = JSON.parse(payload);
+                if (event.type === 'chunk') {
+                    updateAssistant((assistantMessage.textContent || '') + event.chunk);
+                }
+                else if (event.type === 'tool') {
+                    generatedFileCount++;
+                    updateAssistant(`✓ 已生成 ${generatedFileCount} 个文件...\n\n${event.summary || '正在生成项目'}`);
+                }
+                else if (event.type === 'result') {
+                    finalResult = event.result;
+                    updateAssistant(`✅ 项目骨架生成完成！\n\n${projectName} 项目已生成 ${generatedFileCount} 个文件。\n\n现在你可以开始编辑文件或继续输入需求来修改项目。`);
+                    scheduleWorkspaceRefresh(200);
+                }
+                else if (event.type === 'error') {
+                    updateAssistant(`❌ 出错了：${event.message}`);
+                }
+            }
+            catch (e) {
+                console.error('解析事件失败:', e);
+                continue;
+            }
         }
     }
-    if (session.messages.length === 0) {
-        appendMessage('agent', `已切换到会话 #${shortId}（空会话）`);
-    }
-}
-async function createNewSession() {
-    const confirmed = await showConfirmDialog({
-        title: '新建会话',
-        message: '新建会话将清空当前聊天记录和任务历史，新会话将从空白状态开始。确定继续？',
-        confirmLabel: '新建',
-        danger: false,
-    });
-    if (!confirmed)
-        return;
-    const res = await fetch('/api/session', { method: 'POST' });
-    const data = await res.json();
-    currentSessionId = data.sessionId;
-    const shortId = data.sessionId.replace('session-', '').slice(-6);
-    sessionBadge.textContent = `会话 #${shortId}`;
-    chatLog.innerHTML = '';
-    appendMessage('agent', `新会话已创建（#${shortId}）`);
+    return finalResult;
 }
 async function streamChat(prompt) {
-    const response = await fetch('/api/agent/chat', {
+    const response = await fetch('/api/agent/preview', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ prompt, selectedFile, sessionId: currentSessionId }),
@@ -953,6 +1422,9 @@ async function streamChat(prompt) {
                 }
                 else if (event.type === 'tool') {
                     appendToolDetail(event.tool, `${event.summary || '工具调用结果'}\n\n${event.detail || ''}`);
+                    if (event.tool === 'run_command') {
+                        lastRunCommandDetail = `${event.summary || '命令执行'}\n\n${event.detail || ''}`.trim();
+                    }
                     if (event.tool === 'write_file') {
                         sawWriteFileSuccess = true;
                         scheduleWorkspaceRefresh(300);
@@ -961,10 +1433,15 @@ async function streamChat(prompt) {
                 else if (event.type === 'result') {
                     finalResult = event.result;
                     setAgentStatus('idle');
+                    setTaskPhase('succeeded');
+                    renderStructuredSummary(finalResult);
                 }
                 else if (event.type === 'error') {
                     updateAssistant(`出错了：${event.message}`);
                     setAgentStatus('idle');
+                    setTaskPhase('failed', event.message);
+                    lastFailureText = `任务失败：${event.message}`;
+                    renderStructuredSummary(finalResult);
                 }
                 else if (event.type === 'session') {
                     currentSessionId = event.sessionId;
@@ -983,9 +1460,25 @@ async function streamChat(prompt) {
                     if (statusMap[event.status]) {
                         setAgentStatus(statusMap[event.status]);
                     }
+                    const phaseMap = {
+                        planning: 'planning',
+                        executing: 'editing',
+                        summarizing: 'validating',
+                        waiting_confirm: 'waiting_user',
+                        done: 'succeeded',
+                        error: 'failed',
+                    };
+                    if (phaseMap[event.status])
+                        setTaskPhase(phaseMap[event.status], `状态：${event.status}`);
+                    if (event.status === 'error') {
+                        lastFailureText = `任务失败：状态=error`;
+                    }
                 }
                 else if (event.type === 'confirm_request') {
                     setAgentStatus('waiting_confirm');
+                    setTaskPhase('waiting_user');
+                    lastConfirmRequest = { confirmId: event.confirmId, question: event.question, options: event.options };
+                    renderWaitingUserPanel();
                     renderConfirmCard(event);
                 }
             }
@@ -995,6 +1488,100 @@ async function streamChat(prompt) {
         }
     }
     return finalResult;
+}
+async function createNewSession() {
+    try {
+        const response = await fetch('/api/session', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+        });
+        if (!response.ok)
+            throw new Error('创建会话失败');
+        const data = await response.json();
+        if (!data.sessionId)
+            throw new Error('未返回会话 ID');
+        currentSessionId = data.sessionId;
+        const shortId = data.sessionId.replace('session-', '').slice(-6);
+        sessionBadge.textContent = `会话 #${shortId}`;
+        chatLog.innerHTML = '';
+        hideSessionDropdown();
+        showToast({ kind: 'info', title: '已创建新会话', message: `当前会话 #${shortId}` });
+    }
+    catch (error) {
+        showToast({
+            kind: 'error',
+            title: '创建会话失败',
+            message: error.message,
+        });
+    }
+}
+function hideSessionDropdown() {
+    sessionDropdown.classList.remove('visible');
+    sessionDropdown.setAttribute('aria-hidden', 'true');
+}
+async function renderSessionDropdown() {
+    try {
+        const response = await fetch('/api/sessions');
+        if (!response.ok)
+            throw new Error('加载会话列表失败');
+        const data = await response.json();
+        sessionDropdown.innerHTML = '';
+        const sessions = data.sessions ?? [];
+        if (sessions.length === 0) {
+            const empty = document.createElement('button');
+            empty.type = 'button';
+            empty.disabled = true;
+            empty.textContent = '暂无历史会话';
+            sessionDropdown.appendChild(empty);
+        }
+        else {
+            sessions.forEach((session) => {
+                const button = document.createElement('button');
+                button.type = 'button';
+                const shortId = session.sessionId.replace('session-', '').slice(-6);
+                const updatedAt = new Date(session.updatedAt).toLocaleString();
+                button.textContent = `#${shortId} ${session.lastMessage || updatedAt}`;
+                button.addEventListener('click', async () => {
+                    try {
+                        const switchResponse = await fetch('/api/session/switch', {
+                            method: 'POST',
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify({ sessionId: session.sessionId }),
+                        });
+                        if (!switchResponse.ok)
+                            throw new Error('切换会话失败');
+                        const switched = await switchResponse.json();
+                        currentSessionId = switched.sessionId ?? session.sessionId;
+                        sessionBadge.textContent = `会话 #${currentSessionId.replace('session-', '').slice(-6)}`;
+                        chatLog.innerHTML = '';
+                        (switched.messages ?? []).forEach((message) => {
+                            if (message.role === 'user' || message.role === 'assistant' || message.role === 'tool') {
+                                appendMessage(message.role === 'user' ? 'user' : 'agent', String(message.content ?? ''));
+                            }
+                        });
+                        hideSessionDropdown();
+                    }
+                    catch (error) {
+                        showToast({
+                            kind: 'error',
+                            title: '切换会话失败',
+                            message: error.message,
+                        });
+                    }
+                });
+                sessionDropdown.appendChild(button);
+            });
+        }
+        sessionDropdown.classList.add('visible');
+        sessionDropdown.setAttribute('aria-hidden', 'false');
+    }
+    catch (error) {
+        showToast({
+            kind: 'warn',
+            title: '加载会话列表失败',
+            message: error.message,
+        });
+    }
 }
 editor.addEventListener('input', saveCurrentFile);
 editor.addEventListener('blur', saveCurrentFile);
@@ -1012,14 +1599,52 @@ chatForm.addEventListener('submit', async (event) => {
     appendMessage('user', prompt);
     promptInput.value = '';
     setAgentStatus('running');
+    lastRunCommandDetail = null;
+    lastFailureText = null;
     try {
         const result = await streamChat(prompt);
         summary.textContent = JSON.stringify(result, null, 2);
+        renderStructuredSummary(result);
     }
     catch (error) {
         appendMessage('agent', `请求失败：${error.message}`);
+        setTaskPhase('failed', error.message);
+        lastFailureText = `请求失败：${error.message}`;
+        renderStructuredSummary(null);
+        showToast({
+            kind: 'error',
+            title: '任务执行失败',
+            message: error.message,
+            actionLabel: lastUserPrompt ? '重试' : undefined,
+            onAction: () => {
+                if (lastUserPrompt) {
+                    promptInput.value = lastUserPrompt;
+                    chatForm.requestSubmit();
+                }
+            },
+            timeoutMs: 9000,
+        });
         setAgentStatus('idle');
     }
+});
+retryLastTaskBtn.addEventListener('click', () => {
+    if (!lastUserPrompt || agentStatus !== 'idle')
+        return;
+    promptInput.value = lastUserPrompt;
+    chatForm.requestSubmit();
+});
+toggleRawSummaryBtn.addEventListener('click', () => {
+    showRawSummary = !showRawSummary;
+    summary.classList.toggle('hidden', !showRawSummary);
+    toggleRawSummaryBtn.textContent = showRawSummary ? '隐藏原始' : '查看原始';
+});
+clearFailureBtn.addEventListener('click', () => {
+    lastFailureText = null;
+    renderFailurePanel();
+});
+commandConfirmCloseBtn.addEventListener('click', () => {
+    commandConfirmOverlay.classList.remove('visible');
+    commandConfirmOverlay.setAttribute('aria-hidden', 'true');
 });
 newSessionBtn.addEventListener('click', createNewSession);
 sessionBadge.addEventListener('click', (e) => {
@@ -1054,6 +1679,30 @@ applyLayoutWidths();
 initResizers();
 loadExpandedFolders();
 loadWorkspace();
-initSession();
-appendMessage('agent', 'MVP 已启动：你可以先浏览文件树，再输入一个需求开始。');
+// 添加模板生成按钮到新建菜单
+const newItemMenuElement = newItemMenu;
+if (newItemMenuElement) {
+    const scaffoldButton = document.createElement('button');
+    scaffoldButton.type = 'button';
+    scaffoldButton.textContent = '📦 生成项目模板';
+    scaffoldButton.style.borderTop = '1px solid #ccc';
+    scaffoldButton.style.marginTop = '8px';
+    scaffoldButton.style.paddingTop = '8px';
+    scaffoldButton.addEventListener('click', async () => {
+        hideNewItemMenu();
+        const result = await showTemplateSelectionDialog();
+        if (result) {
+            appendMessage('user', `生成 ${result.projectName} 项目（${result.templateId}）`);
+            appendMessage('agent', `正在生成 ${result.projectName} 项目骨架…`);
+            try {
+                await streamGenerateScaffold(result.projectName, result.templateId);
+            }
+            catch (error) {
+                appendMessage('agent', `项目生成失败：${error.message}`);
+            }
+        }
+    });
+    newItemMenuElement.appendChild(scaffoldButton);
+}
+appendMessage('agent', 'MVP 已启动：选择"新建 > 📦 生成项目模板"来快速启动项目，或浏览文件树后输入需求开始。');
 //# sourceMappingURL=app.js.map

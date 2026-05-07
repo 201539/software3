@@ -1,9 +1,9 @@
-import { readFileSync } from 'node:fs';
+import { readFile } from 'node:fs/promises';
 import { resolve } from 'node:path';
 
-function loadEnvFile(filePath: string) {
+async function loadEnvFile(filePath: string) {
   try {
-    const content = readFileSync(filePath, 'utf8');
+    const content = await readFile(filePath, 'utf8');
     for (const line of content.split(/\r?\n/)) {
       const trimmed = line.trim();
       if (!trimmed || trimmed.startsWith('#')) continue;
@@ -20,7 +20,7 @@ function loadEnvFile(filePath: string) {
   }
 }
 
-loadEnvFile(resolve(process.cwd(), '.env'));
+await loadEnvFile(resolve(process.cwd(), '.env'));
 
 const { startRuntimeServer } = await import('./apps/runtime/server.ts');
 

@@ -266,7 +266,7 @@ function setSaveState(next: SaveState, detail?: string) {
     editorSaveBadge.title = lastSaveError;
   } else {
     editorSaveBadge.title = detail ?? editorSaveBadge.textContent ?? '';
-    if (next !== 'error') lastSaveError = null;
+    lastSaveError = null;
   }
 }
 
@@ -1224,89 +1224,90 @@ function updateTreeEmptyState() {
  */
 async function showTemplateSelectionDialog() {
   return new Promise<{ templateId: string; projectName: string } | null>(async (resolve) => {
-    // 获取可用的模板列表
-    const response = await fetch('/api/templates');
-    const { templates } = await response.json() as { templates: Array<{ id: string; name: string; description: string; category: string }> };
+    try {
+      // 获取可用的模板列表
+      const response = await fetch('/api/templates');
+      const { templates } = await response.json() as { templates: Array<{ id: string; name: string; description: string; category: string }> };
 
-    let dialog = document.querySelector<HTMLElement>('#templateSelectionDialog');
-    if (!dialog) {
-      dialog = document.createElement('div');
-      dialog.id = 'templateSelectionDialog';
-      dialog.className = 'tree-dialog-overlay';
-      document.body.appendChild(dialog);
-    }
-  } catch {
-    sessionBadge.textContent = '会话加载失败';
-    showToast({ kind: 'warn', title: '会话加载失败', message: '无法获取会话信息，后端可能未启动。' });
-  }
-}
-
-    // 按类别分组模板
-    const categories: Record<string, typeof templates> = {};
-    for (const template of templates) {
-      if (!categories[template.category]) {
-        categories[template.category] = [];
+      let dialog = document.querySelector<HTMLElement>('#templateSelectionDialog');
+      if (!dialog) {
+        dialog = document.createElement('div');
+        dialog.id = 'templateSelectionDialog';
+        dialog.className = 'tree-dialog-overlay';
+        document.body.appendChild(dialog);
       }
-      categories[template.category].push(template);
-    }
 
-    const categoryNames: Record<string, string> = {
-      frontend: '前端项目',
-      backend: '后端项目',
-      fullstack: '全栈项目',
-      api: 'API 服务',
-      cli: '命令行工具',
-    };
-
-    let templateHtml = '<div class="template-list">';
-    for (const [category, categoryTemplates] of Object.entries(categories)) {
-      templateHtml += `<div class="template-category">
-        <h4>${categoryNames[category] || category}</h4>
-        <div class="template-grid">`;
-      for (const template of categoryTemplates) {
-        templateHtml += `
-          <button type="button" class="template-card" data-template-id="${template.id}">
-            <span class="template-name">${template.name}</span>
-            <span class="template-description">${template.description}</span>
-          </button>`;
-      }
-      templateHtml += '</div></div>';
-    }
-    templateHtml += '</div>';
-
-    dialog.innerHTML = `
-      <div class="tree-dialog" style="max-width: 600px; max-height: 70vh; overflow-y: auto;">
-        <h3>选择项目模板</h3>
-        <p>选择一个模板快速开始新项目</p>
-        ${templateHtml}
-        <div class="tree-dialog-actions">
-          <button type="button" data-role="cancel">取消</button>
-        </div>
-      </div>
-    `;
-    dialog.classList.add('visible');
-
-    let selectedTemplate: string | null = null;
-
-    // 处理模板选择
-    dialog.querySelectorAll<HTMLButtonElement>('.template-card').forEach((button) => {
-      button.addEventListener('click', () => {
-        selectedTemplate = button.dataset.templateId || null;
-        if (selectedTemplate) {
-          // 进入项目名称输入
-          showProjectNameInputDialog(selectedTemplate).then((projectName) => {
-            dialog!.classList.remove('visible');
-            resolve(projectName ? { templateId: selectedTemplate!, projectName } : null);
-          });
+      // 按类别分组模板
+      const categories: Record<string, typeof templates> = {};
+      for (const template of templates) {
+        if (!categories[template.category]) {
+          categories[template.category] = [];
         }
-      });
-    });
+        categories[template.category].push(template);
+      }
 
-    // 处理取消
-    dialog.querySelector<HTMLButtonElement>('[data-role="cancel"]')!.addEventListener('click', () => {
-      dialog!.classList.remove('visible');
+      const categoryNames: Record<string, string> = {
+        frontend: '前端项目',
+        backend: '后端项目',
+        fullstack: '全栈项目',
+        api: 'API 服务',
+        cli: '命令行工具',
+      };
+
+      let templateHtml = '<div class="template-list">';
+      for (const [category, categoryTemplates] of Object.entries(categories)) {
+        templateHtml += `<div class="template-category">
+          <h4>${categoryNames[category] || category}</h4>
+          <div class="template-grid">`;
+        for (const template of categoryTemplates) {
+          templateHtml += `
+            <button type="button" class="template-card" data-template-id="${template.id}">
+              <span class="template-name">${template.name}</span>
+              <span class="template-description">${template.description}</span>
+            </button>`;
+        }
+        templateHtml += '</div></div>';
+      }
+      templateHtml += '</div>';
+
+      dialog.innerHTML = `
+        <div class="tree-dialog" style="max-width: 600px; max-height: 70vh; overflow-y: auto;">
+          <h3>选择项目模板</h3>
+          <p>选择一个模板快速开始新项目</p>
+          ${templateHtml}
+          <div class="tree-dialog-actions">
+            <button type="button" data-role="cancel">取消</button>
+          </div>
+        </div>
+      `;
+      dialog.classList.add('visible');
+
+      let selectedTemplate: string | null = null;
+
+      // 处理模板选择
+      dialog.querySelectorAll<HTMLButtonElement>('.template-card').forEach((button) => {
+        button.addEventListener('click', () => {
+          selectedTemplate = button.dataset.templateId || null;
+          if (selectedTemplate) {
+            // 进入项目名称输入
+            showProjectNameInputDialog(selectedTemplate).then((projectName) => {
+              dialog!.classList.remove('visible');
+              resolve(projectName ? { templateId: selectedTemplate!, projectName } : null);
+            });
+          }
+        });
+      });
+
+      // 处理取消
+      dialog.querySelector<HTMLButtonElement>('[data-role="cancel"]')!.addEventListener('click', () => {
+        dialog!.classList.remove('visible');
+        resolve(null);
+      });
+    } catch {
+      sessionBadge.textContent = '会话加载失败';
+      showToast({ kind: 'warn', title: '会话加载失败', message: '无法获取会话信息，后端可能未启动。' });
       resolve(null);
-    });
+    }
   });
 }
 
@@ -1433,6 +1434,8 @@ async function streamGenerateScaffold(projectName: string, templateId: string) {
 
   return finalResult;
 }
+
+async function streamChat(prompt: string) {
   const response = await fetch('/api/agent/preview', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
@@ -1597,6 +1600,106 @@ async function streamGenerateScaffold(projectName: string, templateId: string) {
   }
 
   return finalResult;
+}
+
+async function createNewSession() {
+  try {
+    const response = await fetch('/api/session', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+    });
+    if (!response.ok) throw new Error('创建会话失败');
+    const data = await response.json() as { sessionId?: string };
+    if (!data.sessionId) throw new Error('未返回会话 ID');
+    currentSessionId = data.sessionId;
+    const shortId = data.sessionId.replace('session-', '').slice(-6);
+    sessionBadge.textContent = `会话 #${shortId}`;
+    chatLog.innerHTML = '';
+    hideSessionDropdown();
+    showToast({ kind: 'info', title: '已创建新会话', message: `当前会话 #${shortId}` });
+  } catch (error) {
+    showToast({
+      kind: 'error',
+      title: '创建会话失败',
+      message: (error as Error).message,
+    });
+  }
+}
+
+function hideSessionDropdown() {
+  sessionDropdown.classList.remove('visible');
+  sessionDropdown.setAttribute('aria-hidden', 'true');
+}
+
+async function renderSessionDropdown() {
+  try {
+    const response = await fetch('/api/sessions');
+    if (!response.ok) throw new Error('加载会话列表失败');
+    const data = await response.json() as {
+      sessions?: Array<{
+        sessionId: string;
+        updatedAt: string;
+        lastMessage: string;
+      }>;
+    };
+
+    sessionDropdown.innerHTML = '';
+    const sessions = data.sessions ?? [];
+    if (sessions.length === 0) {
+      const empty = document.createElement('button');
+      empty.type = 'button';
+      empty.disabled = true;
+      empty.textContent = '暂无历史会话';
+      sessionDropdown.appendChild(empty);
+    } else {
+      sessions.forEach((session) => {
+        const button = document.createElement('button');
+        button.type = 'button';
+        const shortId = session.sessionId.replace('session-', '').slice(-6);
+        const updatedAt = new Date(session.updatedAt).toLocaleString();
+        button.textContent = `#${shortId} ${session.lastMessage || updatedAt}`;
+        button.addEventListener('click', async () => {
+          try {
+            const switchResponse = await fetch('/api/session/switch', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ sessionId: session.sessionId }),
+            });
+            if (!switchResponse.ok) throw new Error('切换会话失败');
+            const switched = await switchResponse.json() as {
+              sessionId?: string;
+              messages?: Array<{ role: string; content?: string | null }>;
+            };
+            currentSessionId = switched.sessionId ?? session.sessionId;
+            sessionBadge.textContent = `会话 #${currentSessionId.replace('session-', '').slice(-6)}`;
+            chatLog.innerHTML = '';
+            (switched.messages ?? []).forEach((message) => {
+              if (message.role === 'user' || message.role === 'assistant' || message.role === 'tool') {
+                appendMessage(message.role === 'user' ? 'user' : 'agent', String(message.content ?? ''));
+              }
+            });
+            hideSessionDropdown();
+          } catch (error) {
+            showToast({
+              kind: 'error',
+              title: '切换会话失败',
+              message: (error as Error).message,
+            });
+          }
+        });
+        sessionDropdown.appendChild(button);
+      });
+    }
+
+    sessionDropdown.classList.add('visible');
+    sessionDropdown.setAttribute('aria-hidden', 'false');
+  } catch (error) {
+    showToast({
+      kind: 'warn',
+      title: '加载会话列表失败',
+      message: (error as Error).message,
+    });
+  }
 }
 
 editor.addEventListener('input', saveCurrentFile);

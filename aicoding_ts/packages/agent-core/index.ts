@@ -1,10 +1,20 @@
 import { createSuccessResponse } from "../shared/index.ts";
+import type {
+  AgentEvent,
+  ChatMessage,
+  Session,
+  SystemMessage,
+  TaskSummary,
+  UserMessage,
+} from "../shared/types.ts";
 import type { LlmClient } from "../llm-client/index.ts";
 import { createPlanner } from "./planner.ts";
 import { createExecutor } from "./executor.ts";
+import type { ConfirmHook } from "./executor.ts";
 import { createReviewer } from "./reviewer.ts";
 import { createSummarizer } from "./summarizer.ts";
 import { createMcpClient } from "./mcp-client.ts";
+import { createExternalMcpRegistry } from "../mcp-client/index.ts";
 import { createTemplateGenerator } from "../template-generator/index.ts";
 import type { TemplateParams } from "../template-generator/types.ts";
 
@@ -204,183 +214,55 @@ export function createAgentCore(
   }
 
   return {
-    async preview(
-      prompt: string,
-      selectedFile: string | null = null,
-      onChunk: ((chunk: unknown) => void) | null = null,
-    ) {
-      const context = contextBuilder.buildForPrompt(prompt, selectedFile);
-      const taskState = createTaskState(prompt, selectedFile, context);
-      const plan = planner.plan(context);
-      recordPhase(taskState, "planning", "构建上下文并分析需求");
+    runTask,
+    preview,
 
-      if (llmClient.model === "mock") {
-        const fallback =
-          "理解需求；构建上下文；生成/修改文件；执行命令验证；回显结果。";
-        recordPhase(taskState, "execution", "mock 模式直接返回结果");
-        const review = reviewer.review({ content: fallback, toolResults: [] });
-        recordPhase(taskState, "review", review.summary);
-        taskState.summary = summarizer.summarize({
-          plan,
-          execution: { content: fallback },
-          review,
-        });
-        if (onChunk) onChunk(fallback);
-        return createSuccessResponse({
-          status: "mocked",
-          output: fallback,
-          context,
-          taskState,
-          plan,
-        });
-      }
-
-      const messages = buildMessages(context, taskState.status, taskState);
-      recordPhase(taskState, "execution", "开始请求模型并执行工具");
-      const { result, content, toolCalls, toolResults } =
-        (await executor.runModel(
-          llmClient,
-          messages,
-          onChunk ?? undefined,
-        )) as ExecutorResult;
-
-      taskState.toolCalls.push(...toolCalls);
-      taskState.toolResults.push(...toolResults);
-
-      const review = reviewer.review({ content, toolResults });
-      recordPhase(taskState, "review", review.summary);
-      taskState.summary = summarizer.summarize({
-        plan,
-        execution: { content },
-        review,
-      });
-      taskState.status = "done";
-
-      const createdFiles = toolResults
-        .filter((item) => item.name === "write_file" && item.result?.ok)
-        .map((item) => item.result?.file);
-
-      return createSuccessResponse({
-        status: "ok",
-        model: llmClient.model,
-        output: content,
-        toolCalls,
-        toolResults,
-        createdFiles,
-        transcript: [{ role: "assistant", content, toolCalls }],
-        raw: result,
-        context,
-        taskState,
-        plan,
-        review,
-      });
-    },
-
-    /**
-     * 生成项目骨架 - 使用模板创建新项目
-     */
     async generateScaffold(
       projectParams: TemplateParams,
       onChunk?: (chunk: unknown) => void,
     ) {
-      const taskState: TaskState = {
-        status: "generating_scaffold",
-        prompt: `生成 ${projectParams.templateId} 模板项目：${projectParams.projectName}`,
-        selectedFile: null,
-        phases: [],
-        contextBudget: { includedFiles: [], maxChars: 0, maxFiles: 0 },
-        toolCalls: [],
-        toolResults: [],
-        summary: "",
-      };
+      const generated = templateGenerator.generateProject(
+        projectParams.templateId,
+        projectParams,
+      );
 
-      try {
-        recordPhase(
-          taskState,
-          "scaffold_planning",
-          `选择模板 ${projectParams.templateId}`,
-        );
-
-        // 生成项目文件
-        const generated = templateGenerator.generateProject(
-          projectParams.templateId,
-          projectParams,
-        );
-        recordPhase(
-          taskState,
-          "scaffold_generation",
-          `生成 ${generated.files.length} 个文件`,
-        );
-
-        // 写入所有文件到工作区
-        const fileWriteResults = [];
-        for (const file of generated.files) {
-          const result = await toolGateway.mcp.callTool("write_file", {
-            path: file.path,
-            content: file.content,
+      for (const file of generated.files) {
+        await toolGateway.writeFile(file.path, file.content);
+        if (onChunk) {
+          onChunk({
+            type: "tool",
+            tool: "write_file",
+            summary: `创建文件: ${file.path}`,
           });
-          fileWriteResults.push(result);
-          taskState.toolResults.push({ name: "write_file", result });
-
-          if (onChunk) {
-            onChunk({
-              type: "tool",
-              tool: "write_file",
-              summary: `创建文件: ${file.path}`,
-            });
-          }
         }
-
-        recordPhase(taskState, "scaffold_complete", `项目骨架生成完成`);
-        taskState.status = "done";
-        taskState.summary = `已成功生成 ${generated.scaffoldInfo.templateName} 项目骨架，包含 ${generated.scaffoldInfo.fileCount} 个文件。项目名称：${generated.scaffoldInfo.projectName}`;
-
-        return createSuccessResponse({
-          status: "scaffold_ok",
-          scaffoldInfo: generated.scaffoldInfo,
-          files: generated.files.map((f) => ({ path: f.path })),
-          output: generated.summary,
-          taskState,
-        });
-      } catch (error: unknown) {
-        const message = error instanceof Error ? error.message : "未知错误";
-        recordPhase(taskState, "scaffold_error", message);
-        taskState.status = "failed";
-        return createSuccessResponse({
-          status: "scaffold_error",
-          error: message,
-          taskState,
-        });
       }
+
+      return createSuccessResponse({
+        status: "scaffold_ok",
+        scaffoldInfo: generated.scaffoldInfo,
+        files: generated.files.map((file) => ({ path: file.path })),
+        output: generated.summary,
+      });
     },
 
-    /**
-     * 获取可用的模板列表
-     */
     getTemplates() {
       return templateGenerator.getTemplateList();
     },
 
-    /**
-     * 获取指定类别的模板
-     */
     getTemplatesByCategory(category: string) {
       return templateGenerator.getTemplatesByCategory(category);
     },
 
-    /**
-     * 获取单个模板的详细信息
-     */
     getTemplateDetail(templateId: string) {
       return templateGenerator.getTemplateDetail(templateId);
     },
 
     async writeFile(path: string, content: string) {
-      return toolGateway.mcp.callTool("write_file", { path, content });
+      return toolGateway.writeFile(path, content);
     },
 
     async runCommand(command: string) {
-      return toolGateway.mcp.callTool("run_command", { command });
+      return toolGateway.runCommand(command);
     },
   };
 }

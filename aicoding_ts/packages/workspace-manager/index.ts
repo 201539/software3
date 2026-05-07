@@ -463,9 +463,9 @@ export function createWorkspaceManager(options: { projectId?: string; rootDir?: 
 
   async function scanDir(dir: string, depth = 0): Promise<TreeNode[]> {
     if (depth > MAX_SCAN_DEPTH) return [];
-    let entries;
+    let entries: Array<{ name: string; isDirectory(): boolean }>;
     try {
-      entries = await readdir(dir, { withFileTypes: true });
+      entries = await readdir(dir, { withFileTypes: true }) as Array<{ name: string; isDirectory(): boolean }>;
     } catch {
       return [];
     }

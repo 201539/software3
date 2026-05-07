@@ -104,7 +104,7 @@ export function createSessionStore(options: { projectId?: string } = {}) {
     await ensureDir();
     let files: string[];
     try {
-      files = await readdir(sessionsDir);
+      files = await readdir(sessionsDir) as string[];
     } catch {
       return [];
     }
