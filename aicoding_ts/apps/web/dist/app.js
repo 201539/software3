@@ -1356,7 +1356,13 @@ async function showTemplateSelectionDialog() {
         try {
             // 获取可用的模板列表
             const response = await fetch('/api/templates');
+            if (!response.ok) {
+                throw new Error(`HTTP ${response.status}`);
+            }
             const { templates } = await response.json();
+            if (!Array.isArray(templates)) {
+                throw new Error('响应中缺少 templates 列表');
+            }
             let dialog = document.querySelector('#templateSelectionDialog');
             if (!dialog) {
                 dialog = document.createElement('div');
@@ -1425,9 +1431,14 @@ async function showTemplateSelectionDialog() {
                 resolve(null);
             });
         }
-        catch {
-            sessionBadge.textContent = '会话加载失败';
-            showToast({ kind: 'warn', title: '会话加载失败', message: '无法获取会话信息，后端可能未启动。' });
+        catch (err) {
+            const message = err instanceof Error ? err.message : String(err);
+            showToast({
+                kind: 'warn',
+                title: '无法加载模板列表',
+                message: `请确认已通过 npm run dev 启动后端（含 /api/templates）。${message}`,
+                timeoutMs: 8000,
+            });
             resolve(null);
         }
     });
@@ -1880,7 +1891,8 @@ newItemBtn.addEventListener('click', (event) => {
     toggleNewItemMenu();
 });
 newItemMenu?.querySelectorAll('button[data-kind]').forEach((button) => {
-    button.addEventListener('click', async () => {
+    button.addEventListener('click', async (event) => {
+        event.stopPropagation();
         hideNewItemMenu();
         const createKind = button.dataset.kind;
         await createWorkspaceItem(createKind, '');
@@ -1903,11 +1915,14 @@ const newItemMenuElement = newItemMenu;
 if (newItemMenuElement) {
     const scaffoldButton = document.createElement('button');
     scaffoldButton.type = 'button';
+    scaffoldButton.setAttribute('role', 'menuitem');
     scaffoldButton.textContent = '📦 生成项目模板';
     scaffoldButton.style.borderTop = '1px solid #ccc';
     scaffoldButton.style.marginTop = '8px';
     scaffoldButton.style.paddingTop = '8px';
-    scaffoldButton.addEventListener('click', async () => {
+    scaffoldButton.addEventListener('click', async (event) => {
+        event.stopPropagation();
+        event.preventDefault();
         hideNewItemMenu();
         const result = await showTemplateSelectionDialog();
         if (result) {

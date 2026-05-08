@@ -577,6 +577,74 @@ export function startRuntimeServer() {
       return;
     }
 
+    // ── 项目模板列表 / 详情 ──
+    if (url.pathname === '/api/templates' && req.method === 'GET') {
+      const templates = agentCore.getTemplates();
+      sendJson(res, 200, { templates });
+      return;
+    }
+
+    if (
+      url.pathname.startsWith('/api/templates/category/') &&
+      req.method === 'GET'
+    ) {
+      const category = decodeURIComponent(
+        url.pathname.replace('/api/templates/category/', ''),
+      );
+      const templates = agentCore.getTemplatesByCategory(category);
+      sendJson(res, 200, { category, templates });
+      return;
+    }
+
+    if (url.pathname.startsWith('/api/templates/') && req.method === 'GET') {
+      const templateId = decodeURIComponent(
+        url.pathname.replace('/api/templates/', ''),
+      );
+      const template = agentCore.getTemplateDetail(templateId);
+      if (!template) {
+        sendJson(res, 404, { error: '模板不存在' });
+        return;
+      }
+      sendJson(res, 200, template);
+      return;
+    }
+
+    // ── 按模板生成项目骨架（SSE）──
+    if (url.pathname === '/api/scaffold/generate' && req.method === 'POST') {
+      const parsed = await parseBody<{
+        projectName?: string;
+        templateId?: string;
+        author?: string;
+        description?: string;
+      }>(req);
+
+      res.writeHead(200, sseHeaders());
+
+      const writeEvent = (event: unknown) => {
+        res.write(`data: ${JSON.stringify(event)}\n\n`);
+      };
+
+      try {
+        const projectParams = {
+          projectName: parsed.projectName ?? 'my-project',
+          templateId: parsed.templateId ?? 'vite-react-ts',
+          author: parsed.author,
+          description: parsed.description,
+        };
+        const result = await agentCore.generateScaffold(projectParams, writeEvent);
+        writeEvent({ type: 'result', result });
+      } catch (error: unknown) {
+        writeEvent({
+          type: 'error',
+          message: error instanceof Error ? error.message : 'Unknown error',
+        });
+      }
+
+      res.write('data: [DONE]\n\n');
+      res.end();
+      return;
+    }
+
     const pathname = url.pathname === "/" ? "/index.html" : url.pathname;
     const content = await tryReadStaticFile(pathname);
 

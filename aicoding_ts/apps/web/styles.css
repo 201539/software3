@@ -967,6 +967,11 @@ textarea {
 .save-badge[data-state="dirty"] { color: #facc15; border-color: rgba(250, 204, 21, 0.35); background: rgba(250, 204, 21, 0.10); }
 .save-badge[data-state="saving"] { color: var(--accent-2); border-color: rgba(34, 211, 238, 0.35); background: rgba(34, 211, 238, 0.10); }
 .save-badge[data-state="error"] { color: #ef4444; border-color: rgba(239, 68, 68, 0.35); background: rgba(239, 68, 68, 0.10); }
+/* 新建下拉与下方文件树重叠时，后绘制的 #fileTree 会抢点击 */
+.sidebar .panel-header.tree-header {
+  position: relative;
+  z-index: 5;
+}
 .tree-header { align-items: flex-start; }
 .tree-header-title { display: flex; flex-direction: column; gap: 4px; }
 .tree-header-actions { display: flex; align-items: center; gap: 8px; }
