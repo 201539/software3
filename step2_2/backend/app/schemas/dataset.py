@@ -1,6 +1,6 @@
 from datetime import datetime
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict
 
 
 class DatasetCreate(BaseModel):
@@ -24,31 +24,27 @@ class DatasetResponse(DatasetCreate):
 
 
 class DatasetSampleCreate(BaseModel):
-    model_config = ConfigDict(populate_by_name=True)
-
     sample_code: str
     input_payload: dict
     expected_output: dict | None = None
     reference_context: dict | None = None
     ground_truth: dict | None = None
     sample_type: str
-    sample_metadata: dict | None = Field(default=None, alias="metadata")
+    metadata: dict | None = None
 
 
 class DatasetSampleUpdate(BaseModel):
-    model_config = ConfigDict(populate_by_name=True)
-
     sample_code: str | None = None
     input_payload: dict | None = None
     expected_output: dict | None = None
     reference_context: dict | None = None
     ground_truth: dict | None = None
     sample_type: str | None = None
-    sample_metadata: dict | None = Field(default=None, alias="metadata")
+    metadata: dict | None = None
 
 
 class DatasetSampleResponse(DatasetSampleCreate):
-    model_config = ConfigDict(from_attributes=True, populate_by_name=True)
+    model_config = ConfigDict(from_attributes=True)
 
     id: int
     dataset_id: int

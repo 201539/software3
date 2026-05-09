@@ -58,7 +58,7 @@ class DatasetManager:
             reference_context=payload.reference_context,
             ground_truth=payload.ground_truth,
             sample_type=payload.sample_type,
-            sample_metadata=payload.sample_metadata,
+            metadata=payload.metadata,
         )
         created = self.dataset_repository.create_sample(sample)
         dataset.sample_count = (dataset.sample_count or 0) + 1
@@ -95,7 +95,7 @@ class DatasetManager:
                 reference_context=sample_payload.reference_context,
                 ground_truth=sample_payload.ground_truth,
                 sample_type=sample_payload.sample_type,
-                sample_metadata=sample_payload.sample_metadata,
+                metadata=sample_payload.metadata,
             )
             created_samples.append(self.dataset_repository.create_sample(sample))
         dataset = self.dataset_repository.get_by_id(dataset_id)
@@ -114,7 +114,7 @@ class DatasetManager:
                 "expected_output": sample.expected_output,
                 "reference_context": sample.reference_context,
                 "ground_truth": sample.ground_truth,
-                "metadata": sample.sample_metadata,
+                "metadata": sample.metadata,
             }
             for sample in samples
         ]
