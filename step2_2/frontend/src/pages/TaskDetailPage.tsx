@@ -5,6 +5,7 @@ import {
   RocketOutlined,
 } from "@ant-design/icons";
 import { App, Button, Descriptions, Progress, Space, Table, Typography } from "antd";
+import { PageTableSkeleton } from "../components/PageTableSkeleton";
 import type { ColumnsType } from "antd/es/table";
 import dayjs from "dayjs";
 import { useCallback, useEffect, useMemo, useState } from "react";
@@ -27,6 +28,7 @@ export function TaskDetailPage() {
   const [runs, setRuns] = useState<EvaluationRun[]>([]);
   const [loading, setLoading] = useState(true);
   const [starting, setStarting] = useState(false);
+  const [hasLoadedOnce, setHasLoadedOnce] = useState(false);
 
   const load = useCallback(async () => {
     if (Number.isNaN(id)) return;
@@ -46,7 +48,10 @@ export function TaskDetailPage() {
       if (!isLoadCurrent(rid)) return;
       message.error((e as Error).message);
     } finally {
-      if (isLoadCurrent(rid)) setLoading(false);
+      if (isLoadCurrent(rid)) {
+        setLoading(false);
+        setHasLoadedOnce(true);
+      }
     }
   }, [id, message, nextLoadId, isLoadCurrent, nextSignal]);
 
@@ -154,14 +159,18 @@ export function TaskDetailPage() {
         </Descriptions>
       )}
       <Typography.Title level={5}>运行记录</Typography.Title>
-      <Table<EvaluationRun>
-        rowKey="id"
-        size="small"
-        loading={loading}
-        columns={columns}
-        dataSource={runs}
-        pagination={false}
-      />
+      {!hasLoadedOnce && loading ? (
+        <PageTableSkeleton rows={6} />
+      ) : (
+        <Table<EvaluationRun>
+          rowKey="id"
+          size="small"
+          loading={loading}
+          columns={columns}
+          dataSource={runs}
+          pagination={false}
+        />
+      )}
     </div>
   );
 }

@@ -1,5 +1,6 @@
 import { DeleteOutlined, EditOutlined, PlusOutlined } from "@ant-design/icons";
 import { App, Button, Form, Input, Modal, Space, Switch, Table, Typography } from "antd";
+import { PageTableSkeleton } from "../components/PageTableSkeleton";
 import type { ColumnsType } from "antd/es/table";
 import dayjs from "dayjs";
 import { useCallback, useEffect, useMemo, useState } from "react";
@@ -19,6 +20,7 @@ export function TargetsPage() {
   const [open, setOpen] = useState(false);
   const [editing, setEditing] = useState<EvaluationTarget | null>(null);
   const [form] = Form.useForm();
+  const [hasLoadedOnce, setHasLoadedOnce] = useState(false);
 
   const load = useCallback(async () => {
     const rid = nextLoadId();
@@ -33,7 +35,10 @@ export function TargetsPage() {
       if (!isLoadCurrent(rid)) return;
       message.error((e as Error).message);
     } finally {
-      if (isLoadCurrent(rid)) setLoading(false);
+      if (isLoadCurrent(rid)) {
+        setLoading(false);
+        setHasLoadedOnce(true);
+      }
     }
   }, [message, nextLoadId, isLoadCurrent, nextSignal]);
 
@@ -180,13 +185,17 @@ export function TargetsPage() {
           </Button>
         </Space>
       </div>
-      <Table<EvaluationTarget>
-        rowKey="id"
-        size="small"
-        loading={loading}
-        columns={columns}
-        dataSource={data}
-      />
+      {!hasLoadedOnce && loading ? (
+        <PageTableSkeleton rows={7} />
+      ) : (
+        <Table<EvaluationTarget>
+          rowKey="id"
+          size="small"
+          loading={loading}
+          columns={columns}
+          dataSource={data}
+        />
+      )}
       <Modal
         title={editing ? "编辑评测目标" : "新建评测目标"}
         open={open}

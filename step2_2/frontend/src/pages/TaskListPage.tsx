@@ -1,5 +1,6 @@
 import { DeleteOutlined, EditOutlined, EyeOutlined, PlusOutlined } from "@ant-design/icons";
 import { App, Button, Form, Input, Select, Space, Table, Typography } from "antd";
+import { PageTableSkeleton } from "../components/PageTableSkeleton";
 import type { ColumnsType } from "antd/es/table";
 import dayjs from "dayjs";
 import { useCallback, useEffect, useMemo, useState } from "react";
@@ -21,6 +22,7 @@ export function TaskListPage() {
   const [page, setPage] = useState(1);
   const [pageSize, setPageSize] = useState(10);
   const [filters, setFilters] = useState<{ name?: string; status?: TaskStatus }>({});
+  const [hasLoadedOnce, setHasLoadedOnce] = useState(false);
 
   const load = useCallback(async () => {
     const rid = nextLoadId();
@@ -44,7 +46,10 @@ export function TaskListPage() {
       if (!isLoadCurrent(rid)) return;
       message.error((e as Error).message);
     } finally {
-      if (isLoadCurrent(rid)) setLoading(false);
+      if (isLoadCurrent(rid)) {
+        setLoading(false);
+        setHasLoadedOnce(true);
+      }
     }
   }, [filters.name, filters.status, page, pageSize, message, nextLoadId, isLoadCurrent, nextSignal]);
 
@@ -148,23 +153,27 @@ export function TaskListPage() {
           </Button>
         </Form.Item>
       </Form>
-      <Table<EvaluationTask>
-        rowKey="id"
-        size="small"
-        loading={loading}
-        columns={columns}
-        dataSource={data}
-        pagination={{
-          current: page,
-          pageSize,
-          total,
-          showSizeChanger: true,
-          onChange: (p, ps) => {
-            setPage(p);
-            setPageSize(ps);
-          },
-        }}
-      />
+      {!hasLoadedOnce && loading ? (
+        <PageTableSkeleton rows={7} />
+      ) : (
+        <Table<EvaluationTask>
+          rowKey="id"
+          size="small"
+          loading={loading}
+          columns={columns}
+          dataSource={data}
+          pagination={{
+            current: page,
+            pageSize,
+            total,
+            showSizeChanger: true,
+            onChange: (p, ps) => {
+              setPage(p);
+              setPageSize(ps);
+            },
+          }}
+        />
+      )}
     </div>
   );
 }

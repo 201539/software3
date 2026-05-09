@@ -1,5 +1,6 @@
 import { PlusOutlined } from "@ant-design/icons";
 import { App, Button, Form, Input, Modal, Select, Table, Tabs, Typography } from "antd";
+import { PageTableSkeleton } from "../components/PageTableSkeleton";
 import type { ColumnsType } from "antd/es/table";
 import dayjs from "dayjs";
 import { useCallback, useEffect, useMemo, useState } from "react";
@@ -21,6 +22,7 @@ export function MetricsPage() {
   const [loading, setLoading] = useState(false);
   const [open, setOpen] = useState(false);
   const [form] = Form.useForm();
+  const [hasLoadedOnce, setHasLoadedOnce] = useState(false);
 
   const load = useCallback(async () => {
     const rid = nextLoadId();
@@ -40,7 +42,10 @@ export function MetricsPage() {
       if (!isLoadCurrent(rid)) return;
       message.error((e as Error).message);
     } finally {
-      if (isLoadCurrent(rid)) setLoading(false);
+      if (isLoadCurrent(rid)) {
+        setLoading(false);
+        setHasLoadedOnce(true);
+      }
     }
   }, [message, page, pageSize, nextLoadId, isLoadCurrent, nextSignal]);
 
@@ -113,7 +118,9 @@ export function MetricsPage() {
           {
             key: "methods",
             label: "评估方法",
-            children: (
+            children: !hasLoadedOnce && loading ? (
+              <PageTableSkeleton rows={5} />
+            ) : (
               <Table<EvaluationMethod>
                 rowKey="id"
                 size="small"
@@ -148,23 +155,27 @@ export function MetricsPage() {
                     自定义指标
                   </Button>
                 </div>
-                <Table<MetricDefinition>
-                  rowKey="id"
-                  size="small"
-                  loading={loading}
-                  columns={metricColumns}
-                  dataSource={metrics}
-                  pagination={{
-                    current: page,
-                    pageSize,
-                    total,
-                    showSizeChanger: true,
-                    onChange: (p, ps) => {
-                      setPage(p);
-                      setPageSize(ps);
-                    },
-                  }}
-                />
+                {!hasLoadedOnce && loading ? (
+                  <PageTableSkeleton rows={6} />
+                ) : (
+                  <Table<MetricDefinition>
+                    rowKey="id"
+                    size="small"
+                    loading={loading}
+                    columns={metricColumns}
+                    dataSource={metrics}
+                    pagination={{
+                      current: page,
+                      pageSize,
+                      total,
+                      showSizeChanger: true,
+                      onChange: (p, ps) => {
+                        setPage(p);
+                        setPageSize(ps);
+                      },
+                    }}
+                  />
+                )}
               </>
             ),
           },

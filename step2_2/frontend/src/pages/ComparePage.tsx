@@ -1,4 +1,5 @@
 import { App, Button, Form, Select, Space, Table, Typography } from "antd";
+import { PageTableSkeleton } from "../components/PageTableSkeleton";
 import type { ColumnsType } from "antd/es/table";
 import ReactECharts from "echarts-for-react";
 import { useCallback, useEffect, useMemo, useState } from "react";
@@ -17,6 +18,7 @@ export function ComparePage() {
   const [result, setResult] = useState<AnalysisCompareResult | null>(null);
   const [loading, setLoading] = useState(false);
   const [form] = Form.useForm();
+  const [bootReady, setBootReady] = useState(false);
 
   const boot = useCallback(async () => {
     const rid = nextLoadId();
@@ -33,6 +35,8 @@ export function ComparePage() {
       if (isRequestAborted(e)) return;
       if (!isLoadCurrent(rid)) return;
       message.error((e as Error).message);
+    } finally {
+      if (isLoadCurrent(rid)) setBootReady(true);
     }
   }, [message, nextLoadId, isLoadCurrent, nextSignal]);
 
@@ -103,44 +107,48 @@ export function ComparePage() {
       <Typography.Paragraph type="secondary">
         基于后端已持久化的运行与样本结果做汇总（与任务需求文档「多任务对比」一致）。
       </Typography.Paragraph>
-      <Form
-        form={form}
-        layout="vertical"
-        style={{ maxWidth: 560, marginBottom: 24 }}
-        onFinish={(v) => void onFinish(v)}
-        initialValues={{ task_ids: [], metric_keys: [] }}
-      >
-        <Form.Item
-          name="task_ids"
-          label="选择评测任务"
-          rules={[{ required: true, message: "至少选择一个任务" }]}
+      {!bootReady ? (
+        <PageTableSkeleton rows={4} />
+      ) : (
+        <Form
+          form={form}
+          layout="vertical"
+          style={{ maxWidth: 560, marginBottom: 24 }}
+          onFinish={(v) => void onFinish(v)}
+          initialValues={{ task_ids: [], metric_keys: [] }}
         >
-          <Select
-            mode="multiple"
-            placeholder="选择任务"
-            optionFilterProp="label"
-            options={tasks.map((t) => ({
-              label: `${t.name} (#${t.id})`,
-              value: t.id,
-            }))}
-          />
-        </Form.Item>
-        <Form.Item name="metric_keys" label="关注指标键（用于分析上下文）">
-          <Select
-            mode="tags"
-            placeholder="可选：从已有指标中选择或手动输入 key"
-            options={metrics.map((m) => ({
-              label: `${m.name} (${m.metric_code})`,
-              value: m.metric_code,
-            }))}
-          />
-        </Form.Item>
-        <Form.Item>
-          <Button type="primary" htmlType="submit" loading={loading}>
-            生成对比
-          </Button>
-        </Form.Item>
-      </Form>
+          <Form.Item
+            name="task_ids"
+            label="选择评测任务"
+            rules={[{ required: true, message: "至少选择一个任务" }]}
+          >
+            <Select
+              mode="multiple"
+              placeholder="选择任务"
+              optionFilterProp="label"
+              options={tasks.map((t) => ({
+                label: `${t.name} (#${t.id})`,
+                value: t.id,
+              }))}
+            />
+          </Form.Item>
+          <Form.Item name="metric_keys" label="关注指标键（用于分析上下文）">
+            <Select
+              mode="tags"
+              placeholder="可选：从已有指标中选择或手动输入 key"
+              options={metrics.map((m) => ({
+                label: `${m.name} (${m.metric_code})`,
+                value: m.metric_code,
+              }))}
+            />
+          </Form.Item>
+          <Form.Item>
+            <Button type="primary" htmlType="submit" loading={loading}>
+              生成对比
+            </Button>
+          </Form.Item>
+        </Form>
+      )}
 
       {result && (
         <Space direction="vertical" size="large" style={{ width: "100%" }}>
