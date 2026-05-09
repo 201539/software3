@@ -1684,7 +1684,7 @@ async function streamGenerateScaffold(projectName: string, templateId: string) {
 }
 
 async function streamChat(prompt: string) {
-  const response = await fetch('/api/agent/preview', {
+  const response = await fetch('/api/agent/chat', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ prompt, selectedFile, sessionId: currentSessionId }),
