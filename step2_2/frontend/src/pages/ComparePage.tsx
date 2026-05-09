@@ -1,12 +1,14 @@
 import { App, Button, Form, Select, Space, Table, Typography } from "antd";
 import type { ColumnsType } from "antd/es/table";
 import ReactECharts from "echarts-for-react";
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { compareAnalysis, listMetrics, listTasks } from "../api/api";
 import type { AnalysisCompareResult, EvaluationTask, MetricDefinition } from "../api/types";
+import { useLoadRequestId } from "../hooks/useLoadRequestId";
 
 export function ComparePage() {
   const { message } = App.useApp();
+  const { next: nextLoadId, isCurrent: isLoadCurrent } = useLoadRequestId();
   const [tasks, setTasks] = useState<EvaluationTask[]>([]);
   const [metrics, setMetrics] = useState<MetricDefinition[]>([]);
   const [result, setResult] = useState<AnalysisCompareResult | null>(null);
@@ -14,17 +16,20 @@ export function ComparePage() {
   const [form] = Form.useForm();
 
   const boot = useCallback(async () => {
+    const rid = nextLoadId();
     try {
       const [t, m] = await Promise.all([
         listTasks({ page: 1, page_size: 200 }),
         listMetrics({ page: 1, page_size: 200 }),
       ]);
+      if (!isLoadCurrent(rid)) return;
       setTasks(t.items as EvaluationTask[]);
       setMetrics(m.items);
     } catch (e) {
+      if (!isLoadCurrent(rid)) return;
       message.error((e as Error).message);
     }
-  }, [message]);
+  }, [message, nextLoadId, isLoadCurrent]);
 
   useEffect(() => {
     void boot();
@@ -55,30 +60,33 @@ export function ComparePage() {
       }
     | undefined;
 
-  const chartOption =
-    detail?.task_run_summary && detail.task_run_summary.length > 0
-      ? {
-          tooltip: { trigger: "axis" },
-          xAxis: {
-            type: "category",
-            data: detail.task_run_summary.map((x) => `任务 #${x.task_id}`),
-          },
-          yAxis: { type: "value", name: "运行次数" },
-          series: [
-            {
-              name: "运行次数",
-              type: "bar",
-              data: detail.task_run_summary.map((x) => x.run_count),
-              itemStyle: { color: "#722ed1" },
-            },
-          ],
-        }
-      : null;
+  const chartOption = useMemo(() => {
+    if (!detail?.task_run_summary || detail.task_run_summary.length === 0) return null;
+    return {
+      tooltip: { trigger: "axis" },
+      xAxis: {
+        type: "category",
+        data: detail.task_run_summary.map((x) => `任务 #${x.task_id}`),
+      },
+      yAxis: { type: "value", name: "运行次数" },
+      series: [
+        {
+          name: "运行次数",
+          type: "bar",
+          data: detail.task_run_summary.map((x) => x.run_count),
+          itemStyle: { color: "#2c5282" },
+        },
+      ],
+    };
+  }, [detail?.task_run_summary]);
 
-  const summaryColumns: ColumnsType<{ task_id: number; run_count: number }> = [
-    { title: "任务 ID", dataIndex: "task_id" },
-    { title: "关联运行数", dataIndex: "run_count" },
-  ];
+  const summaryColumns: ColumnsType<{ task_id: number; run_count: number }> = useMemo(
+    () => [
+      { title: "任务 ID", dataIndex: "task_id" },
+      { title: "关联运行数", dataIndex: "run_count" },
+    ],
+    [],
+  );
 
   return (
     <div>

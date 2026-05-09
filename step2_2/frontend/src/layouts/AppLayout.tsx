@@ -18,6 +18,20 @@ const menuItems = [
   { key: "/metrics", icon: <ExperimentOutlined />, label: "方法与指标" },
 ];
 
+const sectionHints: Record<string, string> = {
+  tasks: "任务编排与运行记录",
+  runs: "单次运行观测与导出",
+  targets: "被测端点与鉴权配置",
+  datasets: "样本与版本管理",
+  compare: "多任务结果对照",
+  metrics: "评测方法与指标定义",
+};
+
+function headerHint(pathname: string): string {
+  const seg = pathname.split("/").filter(Boolean)[0] ?? "";
+  return sectionHints[seg] ?? "评测与质量分析";
+}
+
 export function AppLayout() {
   const navigate = useNavigate();
   const location = useLocation();
@@ -26,11 +40,32 @@ export function AppLayout() {
 
   return (
     <Layout style={{ minHeight: "100%" }}>
-      <Sider breakpoint="lg" collapsedWidth={0} theme="dark" width={220}>
-        <div style={{ padding: "16px 20px" }}>
-          <Typography.Title level={5} style={{ color: "#fff", margin: 0 }}>
-            Agent 评估平台
+      <Sider
+        breakpoint="lg"
+        collapsedWidth={0}
+        theme="dark"
+        width={220}
+        style={{
+          borderRight: "1px solid rgba(255,255,255,0.06)",
+          boxShadow: "2px 0 12px rgba(0,0,0,0.04)",
+        }}
+      >
+        <div
+          style={{
+            padding: "18px 20px 14px",
+            borderBottom: "1px solid rgba(255,255,255,0.08)",
+            marginBottom: 8,
+          }}
+        >
+          <Typography.Title
+            level={5}
+            style={{ color: "#fff", margin: 0, fontWeight: 600, letterSpacing: "0.02em" }}
+          >
+            评测工作台
           </Typography.Title>
+          <Typography.Text style={{ color: "rgba(255,255,255,0.45)", fontSize: 12 }}>
+            实验与数据控制台
+          </Typography.Text>
         </div>
         <Menu
           theme="dark"
@@ -38,28 +73,34 @@ export function AppLayout() {
           selectedKeys={[selected]}
           items={menuItems}
           onClick={({ key }) => navigate(key)}
+          style={{ borderInlineEnd: "none" }}
         />
       </Sider>
       <Layout>
         <Header
           style={{
-            background: "#fff",
+            background: "#f7f8fa",
             padding: "0 24px",
-            borderBottom: "1px solid #f0f0f0",
+            borderBottom: "1px solid #e4e6eb",
             display: "flex",
             alignItems: "center",
+            justifyContent: "space-between",
           }}
         >
-          <Typography.Text type="secondary">通用 Agent 评估平台</Typography.Text>
+          <Typography.Text style={{ color: "#5c6370", fontSize: 13 }}>
+            {headerHint(location.pathname)}
+          </Typography.Text>
         </Header>
-        <Content style={{ margin: 24 }}>
+        <Content style={{ margin: 20 }}>
           <div
+            className="app-page-card"
             style={{
               background: "#fff",
               padding: 24,
               borderRadius: 8,
               minHeight: 360,
-              boxShadow: "0 1px 2px rgba(0,0,0,0.03)",
+              border: "1px solid #e8eaed",
+              boxShadow: "0 1px 3px rgba(15, 23, 42, 0.06)",
             }}
           >
             <Outlet />
