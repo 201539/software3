@@ -8,6 +8,14 @@ export const http = axios.create({
   headers: { "Content-Type": "application/json" },
 });
 
+http.interceptors.request.use((config) => {
+  const token = import.meta.env.VITE_API_BEARER_TOKEN?.trim();
+  if (token) {
+    config.headers.set("Authorization", `Bearer ${token}`);
+  }
+  return config;
+});
+
 http.interceptors.response.use(
   (r) => r,
   (err) => {

@@ -2,13 +2,15 @@ import { DeleteOutlined, PlusOutlined } from "@ant-design/icons";
 import { App, Button, Form, Input, Modal, Space, Table, Typography } from "antd";
 import type { ColumnsType } from "antd/es/table";
 import dayjs from "dayjs";
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { Link } from "react-router-dom";
 import { createDataset, deleteDataset, listDatasets } from "../api/api";
 import type { Dataset } from "../api/types";
+import { useLoadRequestId } from "../hooks/useLoadRequestId";
 
 export function DatasetsPage() {
   const { message, modal } = App.useApp();
+  const { next: nextLoadId, isCurrent: isLoadCurrent } = useLoadRequestId();
   const [data, setData] = useState<Dataset[]>([]);
   const [total, setTotal] = useState(0);
   const [page, setPage] = useState(1);
@@ -18,17 +20,20 @@ export function DatasetsPage() {
   const [form] = Form.useForm();
 
   const load = useCallback(async () => {
+    const rid = nextLoadId();
     setLoading(true);
     try {
       const res = await listDatasets({ page, page_size: pageSize });
+      if (!isLoadCurrent(rid)) return;
       setData(res.items as Dataset[]);
       setTotal(res.total);
     } catch (e) {
+      if (!isLoadCurrent(rid)) return;
       message.error((e as Error).message);
     } finally {
-      setLoading(false);
+      if (isLoadCurrent(rid)) setLoading(false);
     }
-  }, [message, page, pageSize]);
+  }, [message, page, pageSize, nextLoadId, isLoadCurrent]);
 
   useEffect(() => {
     void load();
@@ -54,53 +59,56 @@ export function DatasetsPage() {
     }
   };
 
-  const columns: ColumnsType<Dataset> = [
-    { title: "ID", dataIndex: "id", width: 70 },
-    { title: "编码", dataIndex: "dataset_code", ellipsis: true },
-    { title: "名称", dataIndex: "name", ellipsis: true },
-    { title: "版本", dataIndex: "version", width: 90 },
-    { title: "状态", dataIndex: "status", width: 100 },
-    { title: "样本数", dataIndex: "sample_count", width: 90 },
-    {
-      title: "创建时间",
-      dataIndex: "created_at",
-      width: 170,
-      render: (t: string) => dayjs(t).format("YYYY-MM-DD HH:mm"),
-    },
-    {
-      title: "操作",
-      key: "op",
-      width: 180,
-      render: (_, row) => (
-        <Space>
-          <Link to={`/datasets/${row.id}`}>
-            <Button type="link" size="small">
-              样本管理
+  const columns: ColumnsType<Dataset> = useMemo(
+    () => [
+      { title: "ID", dataIndex: "id", width: 70 },
+      { title: "编码", dataIndex: "dataset_code", ellipsis: true },
+      { title: "名称", dataIndex: "name", ellipsis: true },
+      { title: "版本", dataIndex: "version", width: 90 },
+      { title: "状态", dataIndex: "status", width: 100 },
+      { title: "样本数", dataIndex: "sample_count", width: 90 },
+      {
+        title: "创建时间",
+        dataIndex: "created_at",
+        width: 170,
+        render: (t: string) => dayjs(t).format("YYYY-MM-DD HH:mm"),
+      },
+      {
+        title: "操作",
+        key: "op",
+        width: 180,
+        render: (_, row) => (
+          <Space>
+            <Link to={`/datasets/${row.id}`}>
+              <Button type="link" size="small">
+                样本管理
+              </Button>
+            </Link>
+            <Button
+              type="link"
+              size="small"
+              danger
+              icon={<DeleteOutlined />}
+              onClick={() =>
+                modal.confirm({
+                  title: "删除数据集？",
+                  content: "将同时影响引用该数据集的任务配置。",
+                  onOk: async () => {
+                    await deleteDataset(row.id);
+                    message.success("已删除");
+                    void load();
+                  },
+                })
+              }
+            >
+              删除
             </Button>
-          </Link>
-          <Button
-            type="link"
-            size="small"
-            danger
-            icon={<DeleteOutlined />}
-            onClick={() =>
-              modal.confirm({
-                title: "删除数据集？",
-                content: "将同时影响引用该数据集的任务配置。",
-                onOk: async () => {
-                  await deleteDataset(row.id);
-                  message.success("已删除");
-                  void load();
-                },
-              })
-            }
-          >
-            删除
-          </Button>
-        </Space>
-      ),
-    },
-  ];
+          </Space>
+        ),
+      },
+    ],
+    [load, message, modal],
+  );
 
   return (
     <div>
@@ -122,6 +130,7 @@ export function DatasetsPage() {
       </div>
       <Table<Dataset>
         rowKey="id"
+        size="small"
         loading={loading}
         columns={columns}
         dataSource={data}

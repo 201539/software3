@@ -2,13 +2,15 @@ import { DeleteOutlined, EditOutlined, PlusOutlined } from "@ant-design/icons";
 import { App, Button, Form, Input, Modal, Space, Switch, Table, Typography } from "antd";
 import type { ColumnsType } from "antd/es/table";
 import dayjs from "dayjs";
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { Link } from "react-router-dom";
 import { createTarget, deleteTarget, listTargets, updateTarget } from "../api/api";
 import type { EvaluationTarget } from "../api/types";
+import { useLoadRequestId } from "../hooks/useLoadRequestId";
 
 export function TargetsPage() {
   const { message, modal } = App.useApp();
+  const { next: nextLoadId, isCurrent: isLoadCurrent } = useLoadRequestId();
   const [data, setData] = useState<EvaluationTarget[]>([]);
   const [loading, setLoading] = useState(false);
   const [open, setOpen] = useState(false);
@@ -16,16 +18,19 @@ export function TargetsPage() {
   const [form] = Form.useForm();
 
   const load = useCallback(async () => {
+    const rid = nextLoadId();
     setLoading(true);
     try {
       const items = await listTargets();
+      if (!isLoadCurrent(rid)) return;
       setData(items);
     } catch (e) {
+      if (!isLoadCurrent(rid)) return;
       message.error((e as Error).message);
     } finally {
-      setLoading(false);
+      if (isLoadCurrent(rid)) setLoading(false);
     }
-  }, [message]);
+  }, [message, nextLoadId, isLoadCurrent]);
 
   useEffect(() => {
     void load();
@@ -42,14 +47,17 @@ export function TargetsPage() {
     setOpen(true);
   };
 
-  const openEdit = (row: EvaluationTarget) => {
-    setEditing(row);
-    form.setFieldsValue({
-      ...row,
-      adapter_config_json: JSON.stringify(row.adapter_config ?? {}, null, 2),
-    });
-    setOpen(true);
-  };
+  const openEdit = useCallback(
+    (row: EvaluationTarget) => {
+      setEditing(row);
+      form.setFieldsValue({
+        ...row,
+        adapter_config_json: JSON.stringify(row.adapter_config ?? {}, null, 2),
+      });
+      setOpen(true);
+    },
+    [form],
+  );
 
   const submit = async () => {
     const v = await form.validateFields();
@@ -99,55 +107,58 @@ export function TargetsPage() {
     }
   };
 
-  const columns: ColumnsType<EvaluationTarget> = [
-    { title: "ID", dataIndex: "id", width: 70 },
-    { title: "编码", dataIndex: "target_code", ellipsis: true },
-    { title: "名称", dataIndex: "name", ellipsis: true },
-    { title: "类型", dataIndex: "target_type", width: 130, ellipsis: true },
-    { title: "版本", dataIndex: "version", width: 100 },
-    {
-      title: "启用",
-      dataIndex: "enabled",
-      width: 80,
-      render: (v: boolean) => (v ? "是" : "否"),
-    },
-    {
-      title: "创建时间",
-      dataIndex: "created_at",
-      width: 170,
-      render: (t: string) => dayjs(t).format("YYYY-MM-DD HH:mm"),
-    },
-    {
-      title: "操作",
-      key: "op",
-      width: 160,
-      render: (_, row) => (
-        <Space>
-          <Button type="link" size="small" icon={<EditOutlined />} onClick={() => openEdit(row)}>
-            编辑
-          </Button>
-          <Button
-            type="link"
-            size="small"
-            danger
-            icon={<DeleteOutlined />}
-            onClick={() =>
-              modal.confirm({
-                title: "删除该评测目标？",
-                onOk: async () => {
-                  await deleteTarget(row.id);
-                  message.success("已删除");
-                  void load();
-                },
-              })
-            }
-          >
-            删除
-          </Button>
-        </Space>
-      ),
-    },
-  ];
+  const columns: ColumnsType<EvaluationTarget> = useMemo(
+    () => [
+      { title: "ID", dataIndex: "id", width: 70 },
+      { title: "编码", dataIndex: "target_code", ellipsis: true },
+      { title: "名称", dataIndex: "name", ellipsis: true },
+      { title: "类型", dataIndex: "target_type", width: 130, ellipsis: true },
+      { title: "版本", dataIndex: "version", width: 100 },
+      {
+        title: "启用",
+        dataIndex: "enabled",
+        width: 80,
+        render: (v: boolean) => (v ? "是" : "否"),
+      },
+      {
+        title: "创建时间",
+        dataIndex: "created_at",
+        width: 170,
+        render: (t: string) => dayjs(t).format("YYYY-MM-DD HH:mm"),
+      },
+      {
+        title: "操作",
+        key: "op",
+        width: 160,
+        render: (_, row) => (
+          <Space>
+            <Button type="link" size="small" icon={<EditOutlined />} onClick={() => openEdit(row)}>
+              编辑
+            </Button>
+            <Button
+              type="link"
+              size="small"
+              danger
+              icon={<DeleteOutlined />}
+              onClick={() =>
+                modal.confirm({
+                  title: "删除该评测目标？",
+                  onOk: async () => {
+                    await deleteTarget(row.id);
+                    message.success("已删除");
+                    void load();
+                  },
+                })
+              }
+            >
+              删除
+            </Button>
+          </Space>
+        ),
+      },
+    ],
+    [load, message, modal, openEdit],
+  );
 
   return (
     <div>
@@ -164,7 +175,13 @@ export function TargetsPage() {
           </Button>
         </Space>
       </div>
-      <Table<EvaluationTarget> rowKey="id" loading={loading} columns={columns} dataSource={data} />
+      <Table<EvaluationTarget>
+        rowKey="id"
+        size="small"
+        loading={loading}
+        columns={columns}
+        dataSource={data}
+      />
       <Modal
         title={editing ? "编辑评测目标" : "新建评测目标"}
         open={open}
@@ -197,7 +214,11 @@ export function TargetsPage() {
             label="适配配置 (JSON)"
             rules={[{ required: true, message: "请填写 JSON" }]}
           >
-            <Input.TextArea rows={6} placeholder='{"auth_type":"bearer","timeout_ms":30000}' />
+            <Input.TextArea
+              className="ide-mono"
+              rows={6}
+              placeholder='{"auth_type":"bearer","timeout_ms":30000}'
+            />
           </Form.Item>
           <Form.Item name="enabled" label="启用" valuePropName="checked">
             <Switch />

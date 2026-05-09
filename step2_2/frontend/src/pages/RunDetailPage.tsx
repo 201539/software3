@@ -22,7 +22,7 @@ import {
 import type { ColumnsType } from "antd/es/table";
 import dayjs from "dayjs";
 import ReactECharts from "echarts-for-react";
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
 import {
   cancelRun,
@@ -39,6 +39,7 @@ import {
   resumeRun,
   retryRun,
 } from "../api/api";
+import { wsUrlForRun } from "../api/client";
 import type {
   EvaluationRun,
   EvaluationTask,
@@ -49,14 +50,17 @@ import type {
   TraceRecord,
   WebSocketEvent,
 } from "../api/types";
-import { wsUrlForRun } from "../api/client";
+import { useLoadRequestId } from "../hooks/useLoadRequestId";
 import { RunStatusTag } from "../utils/status";
+
+const CHART_PRIMARY = "#2c5282";
 
 export function RunDetailPage() {
   const { runId } = useParams();
   const id = Number(runId);
   const navigate = useNavigate();
   const { message } = App.useApp();
+  const { next: nextLoadId, isCurrent: isLoadCurrent } = useLoadRequestId();
   const [run, setRun] = useState<EvaluationRun | null>(null);
   const [task, setTask] = useState<EvaluationTask | null>(null);
   const [summary, setSummary] = useState<string | null>(null);
@@ -67,16 +71,21 @@ export function RunDetailPage() {
   const [reports, setReports] = useState<Report[]>([]);
   const [loading, setLoading] = useState(true);
   const [wsLog, setWsLog] = useState<WebSocketEvent[]>([]);
+  const terminalScrollRef = useRef<HTMLDivElement>(null);
+  const wsBufferRef = useRef<WebSocketEvent[]>([]);
+  const wsFlushTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const load = useCallback(async () => {
     if (Number.isNaN(id)) return;
+    const rid = nextLoadId();
     setLoading(true);
     try {
       const r = await getRun(id);
+      if (!isLoadCurrent(rid)) return;
       setRun(r);
-      const t = await getTask(r.task_id);
-      setTask(t);
-      const [sm, samp, met, tr, tc, rep] = await Promise.all([
+
+      const [t, sm, samp, met, tr, tc, rep] = await Promise.all([
+        getTask(r.task_id),
         getRunSummary(id).catch(() => null),
         listSampleResults(id).catch(() => []),
         listRunMetrics(id).catch(() => []),
@@ -84,6 +93,8 @@ export function RunDetailPage() {
         listToolCalls(id, { page: 1, page_size: 100 }).catch(() => ({ items: [] })),
         listReports(id).catch(() => []),
       ]);
+      if (!isLoadCurrent(rid)) return;
+      setTask(t);
       setSummary(sm?.summary ?? r.summary);
       setSamples(samp);
       setMetrics(met);
@@ -91,31 +102,54 @@ export function RunDetailPage() {
       setToolCalls(tc.items as ToolCallLog[]);
       setReports(rep);
     } catch (e) {
+      if (!isLoadCurrent(rid)) return;
       message.error((e as Error).message);
     } finally {
-      setLoading(false);
+      if (isLoadCurrent(rid)) setLoading(false);
     }
-  }, [id, message]);
+  }, [id, message, nextLoadId, isLoadCurrent]);
 
   useEffect(() => {
     void load();
   }, [load]);
 
+  useLayoutEffect(() => {
+    const el = terminalScrollRef.current;
+    if (!el) return;
+    el.scrollTop = el.scrollHeight;
+  }, [wsLog]);
+
   useEffect(() => {
     if (Number.isNaN(id)) return;
     const url = wsUrlForRun(id);
     const ws = new WebSocket(url);
+
+    const flush = () => {
+      wsFlushTimerRef.current = null;
+      const batch = wsBufferRef.current;
+      wsBufferRef.current = [];
+      if (batch.length === 0) return;
+      const last = batch[batch.length - 1];
+      setWsLog((prev) => [...prev, ...batch].slice(-120));
+      setRun((prev) => {
+        if (!prev || prev.id !== id) return prev;
+        const next = { ...prev };
+        if (last.progress != null) next.progress = last.progress;
+        if (last.status) next.status = last.status as EvaluationRun["status"];
+        return next;
+      });
+    };
+
+    const scheduleFlush = () => {
+      if (wsFlushTimerRef.current != null) return;
+      wsFlushTimerRef.current = setTimeout(flush, 48);
+    };
+
     ws.onmessage = (ev) => {
       try {
         const data = JSON.parse(ev.data as string) as WebSocketEvent;
-        setWsLog((prev) => [...prev.slice(-50), data]);
-        setRun((prev) => {
-          if (!prev || prev.id !== id) return prev;
-          const next = { ...prev };
-          if (data.progress != null) next.progress = data.progress;
-          if (data.status) next.status = data.status as EvaluationRun["status"];
-          return next;
-        });
+        wsBufferRef.current.push(data);
+        scheduleFlush();
       } catch {
         /* ignore */
       }
@@ -124,6 +158,11 @@ export function RunDetailPage() {
       /* dev 下后端未启动时静默 */
     };
     return () => {
+      if (wsFlushTimerRef.current != null) {
+        clearTimeout(wsFlushTimerRef.current);
+        wsFlushTimerRef.current = null;
+      }
+      wsBufferRef.current = [];
       ws.close();
     };
   }, [id]);
@@ -138,94 +177,213 @@ export function RunDetailPage() {
     }
   };
 
-  const sampleColumns: ColumnsType<SampleResult> = [
-    { title: "样本 ID", dataIndex: "sample_id", width: 90 },
-    { title: "状态", dataIndex: "status", width: 100 },
-    {
-      title: "输入快照",
-      dataIndex: "input_snapshot",
-      render: (v: Record<string, unknown>) => (
-        <Typography.Paragraph copyable ellipsis={{ rows: 2 }} style={{ margin: 0 }}>
-          {JSON.stringify(v)}
-        </Typography.Paragraph>
-      ),
-    },
-    {
-      title: "输出快照",
-      dataIndex: "output_snapshot",
-      render: (v: Record<string, unknown> | null) =>
-        v ? (
-          <Typography.Paragraph copyable ellipsis={{ rows: 2 }} style={{ margin: 0 }}>
+  const sampleColumns: ColumnsType<SampleResult> = useMemo(
+    () => [
+      { title: "样本 ID", dataIndex: "sample_id", width: 90 },
+      { title: "状态", dataIndex: "status", width: 100 },
+      {
+        title: "输入快照",
+        dataIndex: "input_snapshot",
+        render: (v: Record<string, unknown>) => (
+          <Typography.Paragraph
+            className="ide-mono"
+            copyable
+            ellipsis={{ rows: 2 }}
+            style={{ margin: 0 }}
+          >
             {JSON.stringify(v)}
           </Typography.Paragraph>
-        ) : (
-          "—"
         ),
-    },
-    {
-      title: "评分摘要",
-      dataIndex: "score_summary",
-      width: 120,
-      render: (v: Record<string, unknown> | null) => (v ? JSON.stringify(v) : "—"),
-    },
-  ];
+      },
+      {
+        title: "输出快照",
+        dataIndex: "output_snapshot",
+        render: (v: Record<string, unknown> | null) =>
+          v ? (
+            <Typography.Paragraph
+              className="ide-mono"
+              copyable
+              ellipsis={{ rows: 2 }}
+              style={{ margin: 0 }}
+            >
+              {JSON.stringify(v)}
+            </Typography.Paragraph>
+          ) : (
+            "—"
+          ),
+      },
+      {
+        title: "评分摘要",
+        dataIndex: "score_summary",
+        width: 120,
+        render: (v: Record<string, unknown> | null) =>
+          v ? (
+            <span className="ide-mono">{JSON.stringify(v)}</span>
+          ) : (
+            "—"
+          ),
+      },
+    ],
+    [],
+  );
 
-  const metricColumns: ColumnsType<MetricResult> = [
-    { title: "指标", dataIndex: "metric_name", render: (_, r) => r.metric_name || r.metric_code },
-    { title: "类型", dataIndex: "metric_type", width: 100 },
-    { title: "数值", dataIndex: "metric_value", width: 100 },
-    { title: "文本", dataIndex: "metric_text", ellipsis: true },
-  ];
+  const metricColumns: ColumnsType<MetricResult> = useMemo(
+    () => [
+      { title: "指标", dataIndex: "metric_name", render: (_, r) => r.metric_name || r.metric_code },
+      { title: "类型", dataIndex: "metric_type", width: 100 },
+      { title: "数值", dataIndex: "metric_value", width: 100 },
+      { title: "文本", dataIndex: "metric_text", ellipsis: true },
+    ],
+    [],
+  );
 
-  const traceColumns: ColumnsType<TraceRecord> = [
-    { title: "步序", dataIndex: "step_index", width: 70 },
-    { title: "阶段", dataIndex: "phase", width: 90 },
-    { title: "决策", dataIndex: "decision", ellipsis: true },
-    { title: "观察", dataIndex: "observation", ellipsis: true },
-    {
-      title: "时间",
-      dataIndex: "created_at",
-      width: 170,
-      render: (t: string) => dayjs(t).format("YYYY-MM-DD HH:mm:ss"),
-    },
-  ];
+  const traceColumns: ColumnsType<TraceRecord> = useMemo(
+    () => [
+      { title: "步序", dataIndex: "step_index", width: 70 },
+      { title: "阶段", dataIndex: "phase", width: 90 },
+      { title: "决策", dataIndex: "decision", ellipsis: true },
+      { title: "观察", dataIndex: "observation", ellipsis: true },
+      {
+        title: "时间",
+        dataIndex: "created_at",
+        width: 170,
+        render: (t: string) => dayjs(t).format("YYYY-MM-DD HH:mm:ss"),
+      },
+    ],
+    [],
+  );
 
-  const toolColumns: ColumnsType<ToolCallLog> = [
-    { title: "工具", dataIndex: "tool_name", width: 140 },
-    {
-      title: "成功",
-      dataIndex: "success",
-      width: 80,
-      render: (v: boolean) => (v ? <Tag color="success">是</Tag> : <Tag color="error">否</Tag>),
-    },
-    { title: "耗时 ms", dataIndex: "duration_ms", width: 100 },
-    {
-      title: "输入",
-      dataIndex: "input_payload",
-      ellipsis: true,
-      render: (v: Record<string, unknown>) => JSON.stringify(v),
-    },
-  ];
+  const toolColumns: ColumnsType<ToolCallLog> = useMemo(
+    () => [
+      { title: "工具", dataIndex: "tool_name", width: 140 },
+      {
+        title: "成功",
+        dataIndex: "success",
+        width: 80,
+        render: (v: boolean) => (v ? <Tag color="success">是</Tag> : <Tag color="error">否</Tag>),
+      },
+      { title: "耗时 ms", dataIndex: "duration_ms", width: 100 },
+      {
+        title: "输入",
+        dataIndex: "input_payload",
+        ellipsis: true,
+        render: (v: Record<string, unknown>) => (
+          <span className="ide-mono">{JSON.stringify(v)}</span>
+        ),
+      },
+    ],
+    [],
+  );
 
-  const metricChart =
-    metrics.length > 0
-      ? {
-          tooltip: { trigger: "axis" },
-          xAxis: {
-            type: "category",
-            data: metrics.map((m) => m.metric_name || m.metric_code || `metric-${m.metric_id}`),
-            axisLabel: { rotate: 30 },
-          },
-          yAxis: { type: "value" },
-          series: [
-            {
-              type: "bar",
-              data: metrics.map((m) => m.metric_value ?? 0),
-              itemStyle: { color: "#1677ff" },
-            },
-          ],
-        }
-      : null;
+  const metricChart = useMemo(() => {
+    if (metrics.length === 0) return null;
+    return {
+      tooltip: { trigger: "axis" },
+      xAxis: {
+        type: "category",
+        data: metrics.map((m) => m.metric_name || m.metric_code || `metric-${m.metric_id}`),
+        axisLabel: { rotate: 30 },
+      },
+      yAxis: { type: "value" },
+      series: [
+        {
+          type: "bar",
+          data: metrics.map((m) => m.metric_value ?? 0),
+          itemStyle: { color: CHART_PRIMARY },
+        },
+      ],
+    };
+  }, [metrics]);
+
+  const tabItems = useMemo(
+    () => [
+      {
+        key: "samples",
+        label: "样本结果",
+        children: (
+          <Table
+            rowKey="id"
+            size="small"
+            columns={sampleColumns}
+            dataSource={samples}
+            pagination={false}
+          />
+        ),
+      },
+      {
+        key: "metrics",
+        label: "指标",
+        children: (
+          <Space direction="vertical" style={{ width: "100%" }} size="large">
+            {metricChart ? <ReactECharts style={{ height: 320 }} option={metricChart} /> : null}
+            <Table
+              rowKey="id"
+              size="small"
+              columns={metricColumns}
+              dataSource={metrics}
+              pagination={false}
+            />
+          </Space>
+        ),
+      },
+      {
+        key: "traces",
+        label: "过程轨迹",
+        children: (
+          <Table
+            rowKey="id"
+            size="small"
+            columns={traceColumns}
+            dataSource={traces}
+            pagination={false}
+          />
+        ),
+      },
+      {
+        key: "tools",
+        label: "工具调用",
+        children: (
+          <Table
+            rowKey="id"
+            size="small"
+            columns={toolColumns}
+            dataSource={toolCalls}
+            pagination={false}
+          />
+        ),
+      },
+      {
+        key: "reports",
+        label: "报告",
+        children: (
+          <List
+            dataSource={reports}
+            locale={{ emptyText: "暂无报告，可先点击「导出报告」" }}
+            renderItem={(item) => (
+              <List.Item>
+                <List.Item.Meta
+                  title={item.report_title}
+                  description={`格式: ${item.report_format} · ${item.report_path || "无路径"}`}
+                />
+              </List.Item>
+            )}
+          />
+        ),
+      },
+    ],
+    [
+      samples,
+      metrics,
+      traces,
+      toolCalls,
+      reports,
+      metricChart,
+      sampleColumns,
+      metricColumns,
+      traceColumns,
+      toolColumns,
+    ],
+  );
 
   if (!run && !loading) {
     return <Typography.Text type="danger">运行记录不存在</Typography.Text>;
@@ -233,7 +391,7 @@ export function RunDetailPage() {
 
   return (
     <div>
-      <Space wrap style={{ marginBottom: 16 }}>
+      <Space className="ide-toolbar" wrap>
         <Button
           icon={<ArrowLeftOutlined />}
           onClick={() => navigate(run ? `/tasks/${run.task_id}` : "/tasks")}
@@ -304,7 +462,9 @@ export function RunDetailPage() {
               {summary || run.summary || "—"}
             </Descriptions.Item>
             <Descriptions.Item label="错误" span={2}>
-              {run.error_message || "—"}
+              <span className="ide-mono" style={{ color: "inherit", whiteSpace: "pre-wrap" }}>
+                {run.error_message || "—"}
+              </span>
             </Descriptions.Item>
           </Descriptions>
           <div style={{ marginTop: 16 }}>
@@ -317,77 +477,40 @@ export function RunDetailPage() {
         </Card>
       )}
 
-      <Card size="small" title="WebSocket 实时事件" style={{ marginBottom: 16 }}>
-        <List
-          size="small"
-          dataSource={wsLog}
-          locale={{ emptyText: "等待推送…（需后端与代理支持 WS）" }}
-          renderItem={(item) => (
-            <List.Item>
-              <Space direction="vertical" size={0} style={{ width: "100%" }}>
-                <Space>
-                  <Tag>{item.event}</Tag>
-                  <Typography.Text type="secondary">{item.updated_at}</Typography.Text>
+      <Card
+        size="small"
+        title={<span style={{ fontSize: 13, fontWeight: 600 }}>OUTPUT · 实时事件</span>}
+        style={{ marginBottom: 16 }}
+      >
+        <div ref={terminalScrollRef} className="ide-terminal">
+          <List
+            size="small"
+            dataSource={wsLog}
+            locale={{ emptyText: "等待推送…（需后端与代理支持 WS）" }}
+            renderItem={(item) => (
+              <List.Item style={{ border: "none" }}>
+                <Space direction="vertical" size={0} style={{ width: "100%" }}>
+                  <Space size={8}>
+                    <Tag style={{ fontFamily: "var(--ide-mono)", fontSize: 11 }}>{item.event}</Tag>
+                    <Typography.Text type="secondary" className="ide-mono" style={{ fontSize: 11 }}>
+                      {item.updated_at}
+                    </Typography.Text>
+                  </Space>
+                  <Typography.Text className="ide-mono" style={{ fontSize: 12 }}>
+                    {item.message} · progress {item.progress ?? "—"}
+                  </Typography.Text>
                 </Space>
-                <Typography.Text>
-                  {item.message}（progress: {item.progress ?? "—"}）
-                </Typography.Text>
-              </Space>
-            </List.Item>
-          )}
-        />
+              </List.Item>
+            )}
+          />
+        </div>
       </Card>
 
       <Tabs
-        items={[
-          {
-            key: "samples",
-            label: "样本结果",
-            children: <Table rowKey="id" columns={sampleColumns} dataSource={samples} pagination={false} />,
-          },
-          {
-            key: "metrics",
-            label: "指标",
-            children: (
-              <Space direction="vertical" style={{ width: "100%" }} size="large">
-                {metricChart ? <ReactECharts style={{ height: 320 }} option={metricChart} /> : null}
-                <Table rowKey="id" columns={metricColumns} dataSource={metrics} pagination={false} />
-              </Space>
-            ),
-          },
-          {
-            key: "traces",
-            label: "过程轨迹",
-            children: (
-              <Table rowKey="id" columns={traceColumns} dataSource={traces} pagination={false} />
-            ),
-          },
-          {
-            key: "tools",
-            label: "工具调用",
-            children: (
-              <Table rowKey="id" columns={toolColumns} dataSource={toolCalls} pagination={false} />
-            ),
-          },
-          {
-            key: "reports",
-            label: "报告",
-            children: (
-              <List
-                dataSource={reports}
-                locale={{ emptyText: "暂无报告，可先点击「导出报告」" }}
-                renderItem={(item) => (
-                  <List.Item>
-                    <List.Item.Meta
-                      title={item.report_title}
-                      description={`格式: ${item.report_format} · ${item.report_path || "无路径"}`}
-                    />
-                  </List.Item>
-                )}
-              />
-            ),
-          },
-        ]}
+        className="ide-tabs"
+        type="card"
+        destroyInactiveTabPane={false}
+        items={tabItems}
       />
     </div>
   );

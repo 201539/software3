@@ -11,16 +11,7 @@ import {
   updateTask,
 } from "../api/api";
 import type { EvaluationMethod, EvaluationTarget, MetricDefinition, TaskStatus } from "../api/types";
-
-const taskStatuses: TaskStatus[] = [
-  "draft",
-  "pending",
-  "running",
-  "succeeded",
-  "failed",
-  "cancelled",
-  "archived",
-];
+import { TASK_STATUS_OPTIONS } from "../utils/status";
 
 export function TaskFormPage() {
   const { taskId } = useParams();
@@ -36,59 +27,58 @@ export function TaskFormPage() {
   const [metrics, setMetrics] = useState<MetricDefinition[]>([]);
 
   useEffect(() => {
-    const boot = async () => {
+    let cancelled = false;
+    const id = taskId ? Number(taskId) : NaN;
+    const editing = Boolean(taskId) && !Number.isNaN(id);
+    if (editing) setLoading(true);
+
+    const run = async () => {
       try {
-        const [ts, ds, ms, mt] = await Promise.all([
+        const listsP = Promise.all([
           listTargets({ enabled: true }),
           listDatasets({ page: 1, page_size: 200 }),
           listMethods(),
           listMetrics({ page: 1, page_size: 200 }),
         ]);
+        const taskP = editing ? getTask(id) : Promise.resolve(null);
+        const [[ts, ds, ms, mt], task] = await Promise.all([listsP, taskP]);
+        if (cancelled) return;
         setTargetList(ts);
         setTargets(ts.map((t) => ({ label: `${t.name} (#${t.id})`, value: t.id })));
         setDatasets(ds.items.map((d) => ({ label: `${d.name} (#${d.id})`, value: d.id })));
         setMethods(ms);
         setMetrics(mt.items);
+        if (task) {
+          const explicit = (task.metric_config?.explicit_metrics as string[] | undefined) ?? [];
+          const fuzzy = (task.metric_config?.fuzzy_metrics as string[] | undefined) ?? [];
+          form.setFieldsValue({
+            name: task.name,
+            description: task.description ?? "",
+            target_id: task.target_id,
+            target_type: task.target_type,
+            target_version: task.target_version,
+            dataset_id: task.dataset_id,
+            evaluation_method_config: task.evaluation_method_config,
+            explicit_metrics: explicit,
+            fuzzy_metrics: fuzzy,
+            timeout_ms: (task.run_config?.timeout_ms as number | undefined) ?? 30000,
+            concurrency: (task.run_config?.concurrency as number | undefined) ?? 2,
+            retry_times: (task.run_config?.retry_times as number | undefined) ?? 1,
+            run_mode: (task.run_config?.run_mode as string | undefined) ?? "async",
+            status: task.status,
+          });
+        }
       } catch (e) {
-        message.error((e as Error).message);
-      }
-    };
-    void boot();
-  }, [message]);
-
-  useEffect(() => {
-    if (!taskId) return;
-    const id = Number(taskId);
-    if (Number.isNaN(id)) return;
-    const load = async () => {
-      setLoading(true);
-      try {
-        const task = await getTask(id);
-        const explicit = (task.metric_config?.explicit_metrics as string[] | undefined) ?? [];
-        const fuzzy = (task.metric_config?.fuzzy_metrics as string[] | undefined) ?? [];
-        form.setFieldsValue({
-          name: task.name,
-          description: task.description ?? "",
-          target_id: task.target_id,
-          target_type: task.target_type,
-          target_version: task.target_version,
-          dataset_id: task.dataset_id,
-          evaluation_method_config: task.evaluation_method_config,
-          explicit_metrics: explicit,
-          fuzzy_metrics: fuzzy,
-          timeout_ms: (task.run_config?.timeout_ms as number | undefined) ?? 30000,
-          concurrency: (task.run_config?.concurrency as number | undefined) ?? 2,
-          retry_times: (task.run_config?.retry_times as number | undefined) ?? 1,
-          run_mode: (task.run_config?.run_mode as string | undefined) ?? "async",
-          status: task.status,
-        });
-      } catch (e) {
-        message.error((e as Error).message);
+        if (!cancelled) message.error((e as Error).message);
       } finally {
-        setLoading(false);
+        if (!cancelled && editing) setLoading(false);
       }
     };
-    void load();
+
+    void run();
+    return () => {
+      cancelled = true;
+    };
   }, [taskId, form, message]);
 
   const onTargetChange = (tid: number) => {
@@ -246,7 +236,7 @@ export function TaskFormPage() {
         </Form.Item>
         {isEdit && (
           <Form.Item name="status" label="任务状态">
-            <Select options={taskStatuses.map((s) => ({ label: s, value: s }))} />
+            <Select options={TASK_STATUS_OPTIONS} />
           </Form.Item>
         )}
         <Space>

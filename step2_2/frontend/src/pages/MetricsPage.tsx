@@ -2,12 +2,14 @@ import { PlusOutlined } from "@ant-design/icons";
 import { App, Button, Form, Input, Modal, Select, Table, Tabs, Typography } from "antd";
 import type { ColumnsType } from "antd/es/table";
 import dayjs from "dayjs";
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { createMetric, listMethods, listMetrics } from "../api/api";
 import type { EvaluationMethod, MetricDefinition } from "../api/types";
+import { useLoadRequestId } from "../hooks/useLoadRequestId";
 
 export function MetricsPage() {
   const { message } = App.useApp();
+  const { next: nextLoadId, isCurrent: isLoadCurrent } = useLoadRequestId();
   const [methods, setMethods] = useState<EvaluationMethod[]>([]);
   const [metrics, setMetrics] = useState<MetricDefinition[]>([]);
   const [total, setTotal] = useState(0);
@@ -18,52 +20,61 @@ export function MetricsPage() {
   const [form] = Form.useForm();
 
   const load = useCallback(async () => {
+    const rid = nextLoadId();
     setLoading(true);
     try {
       const [mth, mt] = await Promise.all([
         listMethods(),
         listMetrics({ page, page_size: pageSize }),
       ]);
+      if (!isLoadCurrent(rid)) return;
       setMethods(mth);
       setMetrics(mt.items);
       setTotal(mt.total);
     } catch (e) {
+      if (!isLoadCurrent(rid)) return;
       message.error((e as Error).message);
     } finally {
-      setLoading(false);
+      if (isLoadCurrent(rid)) setLoading(false);
     }
-  }, [message, page, pageSize]);
+  }, [message, page, pageSize, nextLoadId, isLoadCurrent]);
 
   useEffect(() => {
     void load();
   }, [load]);
 
-  const methodColumns: ColumnsType<EvaluationMethod> = [
-    { title: "编码", dataIndex: "method_code", width: 140 },
-    { title: "名称", dataIndex: "name" },
-    { title: "类别", dataIndex: "category", width: 100 },
-    { title: "说明", dataIndex: "description", ellipsis: true },
-    {
-      title: "启用",
-      dataIndex: "enabled",
-      width: 80,
-      render: (v: boolean) => (v ? "是" : "否"),
-    },
-  ];
+  const methodColumns: ColumnsType<EvaluationMethod> = useMemo(
+    () => [
+      { title: "编码", dataIndex: "method_code", width: 140 },
+      { title: "名称", dataIndex: "name" },
+      { title: "类别", dataIndex: "category", width: 100 },
+      { title: "说明", dataIndex: "description", ellipsis: true },
+      {
+        title: "启用",
+        dataIndex: "enabled",
+        width: 80,
+        render: (v: boolean) => (v ? "是" : "否"),
+      },
+    ],
+    [],
+  );
 
-  const metricColumns: ColumnsType<MetricDefinition> = [
-    { title: "编码", dataIndex: "metric_code", width: 160, ellipsis: true },
-    { title: "名称", dataIndex: "name", ellipsis: true },
-    { title: "类型", dataIndex: "metric_type", width: 100 },
-    { title: "维度", dataIndex: "dimension", width: 100 },
-    { title: "计算模式", dataIndex: "calc_mode", width: 100 },
-    {
-      title: "创建时间",
-      dataIndex: "created_at",
-      width: 170,
-      render: (t: string) => dayjs(t).format("YYYY-MM-DD HH:mm"),
-    },
-  ];
+  const metricColumns: ColumnsType<MetricDefinition> = useMemo(
+    () => [
+      { title: "编码", dataIndex: "metric_code", width: 160, ellipsis: true },
+      { title: "名称", dataIndex: "name", ellipsis: true },
+      { title: "类型", dataIndex: "metric_type", width: 100 },
+      { title: "维度", dataIndex: "dimension", width: 100 },
+      { title: "计算模式", dataIndex: "calc_mode", width: 100 },
+      {
+        title: "创建时间",
+        dataIndex: "created_at",
+        width: 170,
+        render: (t: string) => dayjs(t).format("YYYY-MM-DD HH:mm"),
+      },
+    ],
+    [],
+  );
 
   const submitMetric = async () => {
     const v = await form.validateFields();
@@ -100,6 +111,7 @@ export function MetricsPage() {
             children: (
               <Table<EvaluationMethod>
                 rowKey="id"
+                size="small"
                 loading={loading}
                 columns={methodColumns}
                 dataSource={methods}
@@ -132,21 +144,22 @@ export function MetricsPage() {
                   </Button>
                 </div>
                 <Table<MetricDefinition>
-                rowKey="id"
-                loading={loading}
-                columns={metricColumns}
-                dataSource={metrics}
-                pagination={{
-                  current: page,
-                  pageSize,
-                  total,
-                  showSizeChanger: true,
-                  onChange: (p, ps) => {
-                    setPage(p);
-                    setPageSize(ps);
-                  },
-                }}
-              />
+                  rowKey="id"
+                  size="small"
+                  loading={loading}
+                  columns={metricColumns}
+                  dataSource={metrics}
+                  pagination={{
+                    current: page,
+                    pageSize,
+                    total,
+                    showSizeChanger: true,
+                    onChange: (p, ps) => {
+                      setPage(p);
+                      setPageSize(ps);
+                    },
+                  }}
+                />
               </>
             ),
           },

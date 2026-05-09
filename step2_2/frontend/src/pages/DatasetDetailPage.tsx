@@ -2,7 +2,7 @@ import { ArrowLeftOutlined, DeleteOutlined, PlusOutlined } from "@ant-design/ico
 import { App, Button, Form, Input, Modal, Select, Space, Table, Typography } from "antd";
 import type { ColumnsType } from "antd/es/table";
 import dayjs from "dayjs";
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 import {
   createDatasetSample,
@@ -11,6 +11,7 @@ import {
   listDatasetSamples,
 } from "../api/api";
 import type { Dataset, DatasetSample } from "../api/types";
+import { useLoadRequestId } from "../hooks/useLoadRequestId";
 
 const SAMPLE_TYPES = [
   { value: "generic_qa", label: "通用问答" },
@@ -28,6 +29,7 @@ export function DatasetDetailPage() {
   const id = Number(datasetId);
   const navigate = useNavigate();
   const { message, modal } = App.useApp();
+  const { next: nextLoadId, isCurrent: isLoadCurrent } = useLoadRequestId();
   const [dataset, setDataset] = useState<Dataset | null>(null);
   const [samples, setSamples] = useState<DatasetSample[]>([]);
   const [total, setTotal] = useState(0);
@@ -39,21 +41,24 @@ export function DatasetDetailPage() {
 
   const load = useCallback(async () => {
     if (Number.isNaN(id)) return;
+    const rid = nextLoadId();
     setLoading(true);
     try {
       const [d, s] = await Promise.all([
         getDataset(id),
         listDatasetSamples(id, { page, page_size: pageSize }),
       ]);
+      if (!isLoadCurrent(rid)) return;
       setDataset(d);
       setSamples(s.items as DatasetSample[]);
       setTotal(s.total);
     } catch (e) {
+      if (!isLoadCurrent(rid)) return;
       message.error((e as Error).message);
     } finally {
-      setLoading(false);
+      if (isLoadCurrent(rid)) setLoading(false);
     }
-  }, [id, message, page, pageSize]);
+  }, [id, message, page, pageSize, nextLoadId, isLoadCurrent]);
 
   useEffect(() => {
     void load();
@@ -95,48 +100,53 @@ export function DatasetDetailPage() {
     }
   };
 
-  const columns: ColumnsType<DatasetSample> = [
-    { title: "ID", dataIndex: "id", width: 70 },
-    { title: "样本编码", dataIndex: "sample_code", ellipsis: true },
-    { title: "类型", dataIndex: "sample_type", width: 140 },
-    {
-      title: "输入",
-      dataIndex: "input_payload",
-      ellipsis: true,
-      render: (v: Record<string, unknown>) => JSON.stringify(v),
-    },
-    {
-      title: "创建时间",
-      dataIndex: "created_at",
-      width: 170,
-      render: (t: string) => dayjs(t).format("YYYY-MM-DD HH:mm"),
-    },
-    {
-      title: "操作",
-      key: "op",
-      width: 100,
-      render: (_, row) => (
-        <Button
-          type="link"
-          size="small"
-          danger
-          icon={<DeleteOutlined />}
-          onClick={() =>
-            modal.confirm({
-              title: "删除该样本？",
-              onOk: async () => {
-                await deleteDatasetSample(id, row.id);
-                message.success("已删除");
-                void load();
-              },
-            })
-          }
-        >
-          删除
-        </Button>
-      ),
-    },
-  ];
+  const columns: ColumnsType<DatasetSample> = useMemo(
+    () => [
+      { title: "ID", dataIndex: "id", width: 70 },
+      { title: "样本编码", dataIndex: "sample_code", ellipsis: true },
+      { title: "类型", dataIndex: "sample_type", width: 140 },
+      {
+        title: "输入",
+        dataIndex: "input_payload",
+        ellipsis: true,
+        render: (v: Record<string, unknown>) => (
+          <span className="ide-mono">{JSON.stringify(v)}</span>
+        ),
+      },
+      {
+        title: "创建时间",
+        dataIndex: "created_at",
+        width: 170,
+        render: (t: string) => dayjs(t).format("YYYY-MM-DD HH:mm"),
+      },
+      {
+        title: "操作",
+        key: "op",
+        width: 100,
+        render: (_, row) => (
+          <Button
+            type="link"
+            size="small"
+            danger
+            icon={<DeleteOutlined />}
+            onClick={() =>
+              modal.confirm({
+                title: "删除该样本？",
+                onOk: async () => {
+                  await deleteDatasetSample(id, row.id);
+                  message.success("已删除");
+                  void load();
+                },
+              })
+            }
+          >
+            删除
+          </Button>
+        ),
+      },
+    ],
+    [id, load, message, modal],
+  );
 
   if (!dataset && !loading) {
     return <Typography.Text type="danger">数据集不存在</Typography.Text>;
@@ -144,7 +154,7 @@ export function DatasetDetailPage() {
 
   return (
     <div>
-      <Space style={{ marginBottom: 16 }}>
+      <Space className="ide-toolbar" wrap>
         <Button icon={<ArrowLeftOutlined />} onClick={() => navigate("/datasets")}>
           返回
         </Button>
@@ -171,6 +181,7 @@ export function DatasetDetailPage() {
       )}
       <Table<DatasetSample>
         rowKey="id"
+        size="small"
         loading={loading}
         columns={columns}
         dataSource={samples}
