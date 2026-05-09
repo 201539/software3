@@ -29,4 +29,5 @@ class DatasetSample(TimestampMixin, Base):
     reference_context: Mapped[dict | None] = mapped_column(JSON, nullable=True)
     ground_truth: Mapped[dict | None] = mapped_column(JSON, nullable=True)
     sample_type: Mapped[str] = mapped_column(String(32), nullable=False)
-    metadata: Mapped[dict | None] = mapped_column(JSON, nullable=True)
+    # 列名保留 metadata；Python 属性不可叫 metadata（SQLAlchemy Declarative 保留）
+    sample_metadata: Mapped[dict | None] = mapped_column("metadata", JSON, nullable=True)

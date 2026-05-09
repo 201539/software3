@@ -25,9 +25,12 @@ npm run build
 
 ## 环境变量（可选）
 
+勿在源码中写死密钥。复制 `.env.example` 为 `.env.local` 并按需填写（`.env.local` 勿提交）。
+
 | 变量 | 说明 |
 |------|------|
 | `VITE_API_BASE` | 完整 API 前缀，如 `http://127.0.0.1:8000/api/v1`。不设则使用相对路径 `/api/v1`（依赖同源或代理）。 |
+| `VITE_API_BEARER_TOKEN` | 若后端启用 Bearer 鉴权，在此配置 Token；开发机本地使用即可。 |
 
 ## 功能页面
 
