@@ -5,12 +5,15 @@ import {
   RocketOutlined,
 } from "@ant-design/icons";
 import { App, Button, Descriptions, Progress, Space, Table, Typography } from "antd";
+import { PageTableSkeleton } from "../components/PageTableSkeleton";
 import type { ColumnsType } from "antd/es/table";
 import dayjs from "dayjs";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
 import { createRun, getTask, listRuns } from "../api/api";
+import { isRequestAborted } from "../api/client";
 import type { EvaluationRun, EvaluationTask } from "../api/types";
+import { useAbortableRequest } from "../hooks/useAbortableRequest";
 import { useLoadRequestId } from "../hooks/useLoadRequestId";
 import { RunStatusTag, TaskStatusTag } from "../utils/status";
 
@@ -20,27 +23,37 @@ export function TaskDetailPage() {
   const navigate = useNavigate();
   const { message } = App.useApp();
   const { next: nextLoadId, isCurrent: isLoadCurrent } = useLoadRequestId();
+  const nextSignal = useAbortableRequest();
   const [task, setTask] = useState<EvaluationTask | null>(null);
   const [runs, setRuns] = useState<EvaluationRun[]>([]);
   const [loading, setLoading] = useState(true);
   const [starting, setStarting] = useState(false);
+  const [hasLoadedOnce, setHasLoadedOnce] = useState(false);
 
   const load = useCallback(async () => {
     if (Number.isNaN(id)) return;
     const rid = nextLoadId();
+    const signal = nextSignal();
     setLoading(true);
     try {
-      const [t, r] = await Promise.all([getTask(id), listRuns({ task_id: id, page: 1, page_size: 50 })]);
+      const [t, r] = await Promise.all([
+        getTask(id, { signal }),
+        listRuns({ task_id: id, page: 1, page_size: 50 }, { signal }),
+      ]);
       if (!isLoadCurrent(rid)) return;
       setTask(t);
       setRuns(r.items as EvaluationRun[]);
     } catch (e) {
+      if (isRequestAborted(e)) return;
       if (!isLoadCurrent(rid)) return;
       message.error((e as Error).message);
     } finally {
-      if (isLoadCurrent(rid)) setLoading(false);
+      if (isLoadCurrent(rid)) {
+        setLoading(false);
+        setHasLoadedOnce(true);
+      }
     }
-  }, [id, message, nextLoadId, isLoadCurrent]);
+  }, [id, message, nextLoadId, isLoadCurrent, nextSignal]);
 
   useEffect(() => {
     void load();
@@ -146,14 +159,18 @@ export function TaskDetailPage() {
         </Descriptions>
       )}
       <Typography.Title level={5}>运行记录</Typography.Title>
-      <Table<EvaluationRun>
-        rowKey="id"
-        size="small"
-        loading={loading}
-        columns={columns}
-        dataSource={runs}
-        pagination={false}
-      />
+      {!hasLoadedOnce && loading ? (
+        <PageTableSkeleton rows={6} />
+      ) : (
+        <Table<EvaluationRun>
+          rowKey="id"
+          size="small"
+          loading={loading}
+          columns={columns}
+          dataSource={runs}
+          pagination={false}
+        />
+      )}
     </div>
   );
 }

@@ -1,5 +1,6 @@
 import { ArrowLeftOutlined, DeleteOutlined, PlusOutlined } from "@ant-design/icons";
 import { App, Button, Form, Input, Modal, Select, Space, Table, Typography } from "antd";
+import { PageTableSkeleton } from "../components/PageTableSkeleton";
 import type { ColumnsType } from "antd/es/table";
 import dayjs from "dayjs";
 import { useCallback, useEffect, useMemo, useState } from "react";
@@ -10,7 +11,9 @@ import {
   getDataset,
   listDatasetSamples,
 } from "../api/api";
+import { isRequestAborted } from "../api/client";
 import type { Dataset, DatasetSample } from "../api/types";
+import { useAbortableRequest } from "../hooks/useAbortableRequest";
 import { useLoadRequestId } from "../hooks/useLoadRequestId";
 
 const SAMPLE_TYPES = [
@@ -30,6 +33,7 @@ export function DatasetDetailPage() {
   const navigate = useNavigate();
   const { message, modal } = App.useApp();
   const { next: nextLoadId, isCurrent: isLoadCurrent } = useLoadRequestId();
+  const nextSignal = useAbortableRequest();
   const [dataset, setDataset] = useState<Dataset | null>(null);
   const [samples, setSamples] = useState<DatasetSample[]>([]);
   const [total, setTotal] = useState(0);
@@ -38,27 +42,33 @@ export function DatasetDetailPage() {
   const [loading, setLoading] = useState(true);
   const [open, setOpen] = useState(false);
   const [form] = Form.useForm();
+  const [hasLoadedOnce, setHasLoadedOnce] = useState(false);
 
   const load = useCallback(async () => {
     if (Number.isNaN(id)) return;
     const rid = nextLoadId();
+    const signal = nextSignal();
     setLoading(true);
     try {
       const [d, s] = await Promise.all([
-        getDataset(id),
-        listDatasetSamples(id, { page, page_size: pageSize }),
+        getDataset(id, { signal }),
+        listDatasetSamples(id, { page, page_size: pageSize }, { signal }),
       ]);
       if (!isLoadCurrent(rid)) return;
       setDataset(d);
       setSamples(s.items as DatasetSample[]);
       setTotal(s.total);
     } catch (e) {
+      if (isRequestAborted(e)) return;
       if (!isLoadCurrent(rid)) return;
       message.error((e as Error).message);
     } finally {
-      if (isLoadCurrent(rid)) setLoading(false);
+      if (isLoadCurrent(rid)) {
+        setLoading(false);
+        setHasLoadedOnce(true);
+      }
     }
-  }, [id, message, page, pageSize, nextLoadId, isLoadCurrent]);
+  }, [id, message, page, pageSize, nextLoadId, isLoadCurrent, nextSignal]);
 
   useEffect(() => {
     void load();
@@ -179,23 +189,27 @@ export function DatasetDetailPage() {
           {dataset.sample_count}
         </Typography.Paragraph>
       )}
-      <Table<DatasetSample>
-        rowKey="id"
-        size="small"
-        loading={loading}
-        columns={columns}
-        dataSource={samples}
-        pagination={{
-          current: page,
-          pageSize,
-          total,
-          showSizeChanger: true,
-          onChange: (p, ps) => {
-            setPage(p);
-            setPageSize(ps);
-          },
-        }}
-      />
+      {!hasLoadedOnce && loading ? (
+        <PageTableSkeleton rows={7} />
+      ) : (
+        <Table<DatasetSample>
+          rowKey="id"
+          size="small"
+          loading={loading}
+          columns={columns}
+          dataSource={samples}
+          pagination={{
+            current: page,
+            pageSize,
+            total,
+            showSizeChanger: true,
+            onChange: (p, ps) => {
+              setPage(p);
+              setPageSize(ps);
+            },
+          }}
+        />
+      )}
       <Modal
         title="添加样本"
         open={open}

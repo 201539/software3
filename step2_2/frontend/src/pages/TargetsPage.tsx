@@ -1,36 +1,46 @@
 import { DeleteOutlined, EditOutlined, PlusOutlined } from "@ant-design/icons";
 import { App, Button, Form, Input, Modal, Space, Switch, Table, Typography } from "antd";
+import { PageTableSkeleton } from "../components/PageTableSkeleton";
 import type { ColumnsType } from "antd/es/table";
 import dayjs from "dayjs";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { Link } from "react-router-dom";
 import { createTarget, deleteTarget, listTargets, updateTarget } from "../api/api";
+import { isRequestAborted } from "../api/client";
 import type { EvaluationTarget } from "../api/types";
+import { useAbortableRequest } from "../hooks/useAbortableRequest";
 import { useLoadRequestId } from "../hooks/useLoadRequestId";
 
 export function TargetsPage() {
   const { message, modal } = App.useApp();
   const { next: nextLoadId, isCurrent: isLoadCurrent } = useLoadRequestId();
+  const nextSignal = useAbortableRequest();
   const [data, setData] = useState<EvaluationTarget[]>([]);
   const [loading, setLoading] = useState(false);
   const [open, setOpen] = useState(false);
   const [editing, setEditing] = useState<EvaluationTarget | null>(null);
   const [form] = Form.useForm();
+  const [hasLoadedOnce, setHasLoadedOnce] = useState(false);
 
   const load = useCallback(async () => {
     const rid = nextLoadId();
+    const signal = nextSignal();
     setLoading(true);
     try {
-      const items = await listTargets();
+      const items = await listTargets(undefined, { signal });
       if (!isLoadCurrent(rid)) return;
       setData(items);
     } catch (e) {
+      if (isRequestAborted(e)) return;
       if (!isLoadCurrent(rid)) return;
       message.error((e as Error).message);
     } finally {
-      if (isLoadCurrent(rid)) setLoading(false);
+      if (isLoadCurrent(rid)) {
+        setLoading(false);
+        setHasLoadedOnce(true);
+      }
     }
-  }, [message, nextLoadId, isLoadCurrent]);
+  }, [message, nextLoadId, isLoadCurrent, nextSignal]);
 
   useEffect(() => {
     void load();
@@ -175,13 +185,17 @@ export function TargetsPage() {
           </Button>
         </Space>
       </div>
-      <Table<EvaluationTarget>
-        rowKey="id"
-        size="small"
-        loading={loading}
-        columns={columns}
-        dataSource={data}
-      />
+      {!hasLoadedOnce && loading ? (
+        <PageTableSkeleton rows={7} />
+      ) : (
+        <Table<EvaluationTarget>
+          rowKey="id"
+          size="small"
+          loading={loading}
+          columns={columns}
+          dataSource={data}
+        />
+      )}
       <Modal
         title={editing ? "编辑评测目标" : "新建评测目标"}
         open={open}

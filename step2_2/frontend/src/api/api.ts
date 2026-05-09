@@ -18,12 +18,21 @@ import type {
   TraceRecord,
 } from "./types";
 
-export async function listTargets(params?: {
-  name?: string;
-  target_type?: string;
-  enabled?: boolean;
-}): Promise<EvaluationTarget[]> {
-  const { data } = await http.get<EvaluationTarget[]>("/evaluation-targets", { params });
+/** 传给 axios 的 `signal`，用于取消仍在进行中的请求 */
+export type ApiRequestOptions = { signal?: AbortSignal };
+
+export async function listTargets(
+  params?: {
+    name?: string;
+    target_type?: string;
+    enabled?: boolean;
+  },
+  options?: ApiRequestOptions,
+): Promise<EvaluationTarget[]> {
+  const { data } = await http.get<EvaluationTarget[]>("/evaluation-targets", {
+    params,
+    signal: options?.signal,
+  });
   return data;
 }
 
@@ -53,18 +62,26 @@ export async function deleteTarget(id: number): Promise<void> {
   await http.delete(`/evaluation-targets/${id}`);
 }
 
-export async function listTasks(params?: {
-  name?: string;
-  status?: TaskStatus;
-  page?: number;
-  page_size?: number;
-}): Promise<PageResponse<EvaluationTask>> {
-  const { data } = await http.get<PageResponse<EvaluationTask>>("/evaluation-tasks", { params });
+export async function listTasks(
+  params?: {
+    name?: string;
+    status?: TaskStatus;
+    page?: number;
+    page_size?: number;
+  },
+  options?: ApiRequestOptions,
+): Promise<PageResponse<EvaluationTask>> {
+  const { data } = await http.get<PageResponse<EvaluationTask>>("/evaluation-tasks", {
+    params,
+    signal: options?.signal,
+  });
   return data;
 }
 
-export async function getTask(id: number): Promise<EvaluationTask> {
-  const { data } = await http.get<EvaluationTask>(`/evaluation-tasks/${id}`);
+export async function getTask(id: number, options?: ApiRequestOptions): Promise<EvaluationTask> {
+  const { data } = await http.get<EvaluationTask>(`/evaluation-tasks/${id}`, {
+    signal: options?.signal,
+  });
   return data;
 }
 
@@ -107,18 +124,26 @@ export async function deleteTask(id: number): Promise<void> {
   await http.delete(`/evaluation-tasks/${id}`);
 }
 
-export async function listRuns(params?: {
-  task_id?: number;
-  status?: string;
-  page?: number;
-  page_size?: number;
-}): Promise<PageResponse<EvaluationRun>> {
-  const { data } = await http.get<PageResponse<EvaluationRun>>("/evaluation-runs", { params });
+export async function listRuns(
+  params?: {
+    task_id?: number;
+    status?: string;
+    page?: number;
+    page_size?: number;
+  },
+  options?: ApiRequestOptions,
+): Promise<PageResponse<EvaluationRun>> {
+  const { data } = await http.get<PageResponse<EvaluationRun>>("/evaluation-runs", {
+    params,
+    signal: options?.signal,
+  });
   return data;
 }
 
-export async function getRun(id: number): Promise<EvaluationRun> {
-  const { data } = await http.get<EvaluationRun>(`/evaluation-runs/${id}`);
+export async function getRun(id: number, options?: ApiRequestOptions): Promise<EvaluationRun> {
+  const { data } = await http.get<EvaluationRun>(`/evaluation-runs/${id}`, {
+    signal: options?.signal,
+  });
   return data;
 }
 
@@ -153,28 +178,41 @@ export async function retryRun(id: number): Promise<{ run_id: number; status: st
   return data;
 }
 
-export async function getRunSummary(id: number): Promise<RunSummary> {
-  const { data } = await http.get<RunSummary>(`/evaluation-runs/${id}/summary`);
+export async function getRunSummary(id: number, options?: ApiRequestOptions): Promise<RunSummary> {
+  const { data } = await http.get<RunSummary>(`/evaluation-runs/${id}/summary`, {
+    signal: options?.signal,
+  });
   return data;
 }
 
-export async function listSampleResults(runId: number): Promise<SampleResult[]> {
-  const { data } = await http.get<SampleResult[]>(`/evaluation-runs/${runId}/samples`);
+export async function listSampleResults(
+  runId: number,
+  options?: ApiRequestOptions,
+): Promise<SampleResult[]> {
+  const { data } = await http.get<SampleResult[]>(`/evaluation-runs/${runId}/samples`, {
+    signal: options?.signal,
+  });
   return data;
 }
 
-export async function listDatasets(params?: {
-  name?: string;
-  status?: string;
-  page?: number;
-  page_size?: number;
-}): Promise<PageResponse<Dataset>> {
-  const { data } = await http.get<PageResponse<Dataset>>("/datasets", { params });
+export async function listDatasets(
+  params?: {
+    name?: string;
+    status?: string;
+    page?: number;
+    page_size?: number;
+  },
+  options?: ApiRequestOptions,
+): Promise<PageResponse<Dataset>> {
+  const { data } = await http.get<PageResponse<Dataset>>("/datasets", {
+    params,
+    signal: options?.signal,
+  });
   return data;
 }
 
-export async function getDataset(id: number): Promise<Dataset> {
-  const { data } = await http.get<Dataset>(`/datasets/${id}`);
+export async function getDataset(id: number, options?: ApiRequestOptions): Promise<Dataset> {
+  const { data } = await http.get<Dataset>(`/datasets/${id}`, { signal: options?.signal });
   return data;
 }
 
@@ -197,10 +235,11 @@ export async function deleteDataset(id: number): Promise<void> {
 export async function listDatasetSamples(
   datasetId: number,
   params?: { page?: number; page_size?: number },
+  options?: ApiRequestOptions,
 ): Promise<PageResponse<DatasetSample>> {
   const { data } = await http.get<PageResponse<DatasetSample>>(
     `/datasets/${datasetId}/samples`,
-    { params },
+    { params, signal: options?.signal },
   );
   return data;
 }
@@ -225,16 +264,24 @@ export async function deleteDatasetSample(datasetId: number, sampleId: number): 
   await http.delete(`/datasets/${datasetId}/samples/${sampleId}`);
 }
 
-export async function listMethods(): Promise<EvaluationMethod[]> {
-  const { data } = await http.get<EvaluationMethod[]>("/evaluation-methods");
+export async function listMethods(options?: ApiRequestOptions): Promise<EvaluationMethod[]> {
+  const { data } = await http.get<EvaluationMethod[]>("/evaluation-methods", {
+    signal: options?.signal,
+  });
   return data;
 }
 
-export async function listMetrics(params?: {
-  page?: number;
-  page_size?: number;
-}): Promise<PageResponse<MetricDefinition>> {
-  const { data } = await http.get<PageResponse<MetricDefinition>>("/metrics", { params });
+export async function listMetrics(
+  params?: {
+    page?: number;
+    page_size?: number;
+  },
+  options?: ApiRequestOptions,
+): Promise<PageResponse<MetricDefinition>> {
+  const { data } = await http.get<PageResponse<MetricDefinition>>("/metrics", {
+    params,
+    signal: options?.signal,
+  });
   return data;
 }
 
@@ -252,18 +299,24 @@ export async function createMetric(body: {
   return data;
 }
 
-export async function listRunMetrics(runId: number): Promise<MetricResult[]> {
-  const { data } = await http.get<MetricResult[]>(`/evaluation-runs/${runId}/metrics`);
+export async function listRunMetrics(
+  runId: number,
+  options?: ApiRequestOptions,
+): Promise<MetricResult[]> {
+  const { data } = await http.get<MetricResult[]>(`/evaluation-runs/${runId}/metrics`, {
+    signal: options?.signal,
+  });
   return data;
 }
 
 export async function listTraces(
   runId: number,
   params?: { sample_id?: number; page?: number; page_size?: number },
+  options?: ApiRequestOptions,
 ): Promise<PageResponse<TraceRecord>> {
   const { data } = await http.get<PageResponse<TraceRecord>>(
     `/evaluation-runs/${runId}/traces`,
-    { params },
+    { params, signal: options?.signal },
   );
   return data;
 }
@@ -271,16 +324,19 @@ export async function listTraces(
 export async function listToolCalls(
   runId: number,
   params?: { sample_id?: number; page?: number; page_size?: number },
+  options?: ApiRequestOptions,
 ): Promise<PageResponse<ToolCallLog>> {
   const { data } = await http.get<PageResponse<ToolCallLog>>(
     `/evaluation-runs/${runId}/tool-calls`,
-    { params },
+    { params, signal: options?.signal },
   );
   return data;
 }
 
-export async function listReports(runId: number): Promise<Report[]> {
-  const { data } = await http.get<Report[]>(`/evaluation-runs/${runId}/reports`);
+export async function listReports(runId: number, options?: ApiRequestOptions): Promise<Report[]> {
+  const { data } = await http.get<Report[]>(`/evaluation-runs/${runId}/reports`, {
+    signal: options?.signal,
+  });
   return data;
 }
 
@@ -294,11 +350,16 @@ export async function exportRunReport(
   return data;
 }
 
-export async function compareAnalysis(body: {
-  task_ids: number[];
-  metric_keys: string[];
-}): Promise<AnalysisCompareResult> {
-  const { data } = await http.post<AnalysisCompareResult>("/analysis/compare", body);
+export async function compareAnalysis(
+  body: {
+    task_ids: number[];
+    metric_keys: string[];
+  },
+  options?: ApiRequestOptions,
+): Promise<AnalysisCompareResult> {
+  const { data } = await http.post<AnalysisCompareResult>("/analysis/compare", body, {
+    signal: options?.signal,
+  });
   return data;
 }
 

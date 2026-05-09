@@ -39,7 +39,7 @@ import {
   resumeRun,
   retryRun,
 } from "../api/api";
-import { wsUrlForRun } from "../api/client";
+import { isRequestAborted, wsUrlForRun } from "../api/client";
 import type {
   EvaluationRun,
   EvaluationTask,
@@ -50,6 +50,7 @@ import type {
   TraceRecord,
   WebSocketEvent,
 } from "../api/types";
+import { useAbortableRequest } from "../hooks/useAbortableRequest";
 import { useLoadRequestId } from "../hooks/useLoadRequestId";
 import { RunStatusTag } from "../utils/status";
 
@@ -61,6 +62,7 @@ export function RunDetailPage() {
   const navigate = useNavigate();
   const { message } = App.useApp();
   const { next: nextLoadId, isCurrent: isLoadCurrent } = useLoadRequestId();
+  const nextSignal = useAbortableRequest();
   const [run, setRun] = useState<EvaluationRun | null>(null);
   const [task, setTask] = useState<EvaluationTask | null>(null);
   const [summary, setSummary] = useState<string | null>(null);
@@ -78,20 +80,21 @@ export function RunDetailPage() {
   const load = useCallback(async () => {
     if (Number.isNaN(id)) return;
     const rid = nextLoadId();
+    const signal = nextSignal();
     setLoading(true);
     try {
-      const r = await getRun(id);
+      const r = await getRun(id, { signal });
       if (!isLoadCurrent(rid)) return;
       setRun(r);
 
       const [t, sm, samp, met, tr, tc, rep] = await Promise.all([
-        getTask(r.task_id),
-        getRunSummary(id).catch(() => null),
-        listSampleResults(id).catch(() => []),
-        listRunMetrics(id).catch(() => []),
-        listTraces(id, { page: 1, page_size: 100 }).catch(() => ({ items: [] })),
-        listToolCalls(id, { page: 1, page_size: 100 }).catch(() => ({ items: [] })),
-        listReports(id).catch(() => []),
+        getTask(r.task_id, { signal }),
+        getRunSummary(id, { signal }).catch(() => null),
+        listSampleResults(id, { signal }).catch(() => []),
+        listRunMetrics(id, { signal }).catch(() => []),
+        listTraces(id, { page: 1, page_size: 100 }, { signal }).catch(() => ({ items: [] })),
+        listToolCalls(id, { page: 1, page_size: 100 }, { signal }).catch(() => ({ items: [] })),
+        listReports(id, { signal }).catch(() => []),
       ]);
       if (!isLoadCurrent(rid)) return;
       setTask(t);
@@ -102,12 +105,13 @@ export function RunDetailPage() {
       setToolCalls(tc.items as ToolCallLog[]);
       setReports(rep);
     } catch (e) {
+      if (isRequestAborted(e)) return;
       if (!isLoadCurrent(rid)) return;
       message.error((e as Error).message);
     } finally {
       if (isLoadCurrent(rid)) setLoading(false);
     }
-  }, [id, message, nextLoadId, isLoadCurrent]);
+  }, [id, message, nextLoadId, isLoadCurrent, nextSignal]);
 
   useEffect(() => {
     void load();

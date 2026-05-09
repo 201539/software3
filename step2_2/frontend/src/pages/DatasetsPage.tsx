@@ -1,16 +1,20 @@
 import { DeleteOutlined, PlusOutlined } from "@ant-design/icons";
 import { App, Button, Form, Input, Modal, Space, Table, Typography } from "antd";
+import { PageTableSkeleton } from "../components/PageTableSkeleton";
 import type { ColumnsType } from "antd/es/table";
 import dayjs from "dayjs";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { Link } from "react-router-dom";
 import { createDataset, deleteDataset, listDatasets } from "../api/api";
+import { isRequestAborted } from "../api/client";
 import type { Dataset } from "../api/types";
+import { useAbortableRequest } from "../hooks/useAbortableRequest";
 import { useLoadRequestId } from "../hooks/useLoadRequestId";
 
 export function DatasetsPage() {
   const { message, modal } = App.useApp();
   const { next: nextLoadId, isCurrent: isLoadCurrent } = useLoadRequestId();
+  const nextSignal = useAbortableRequest();
   const [data, setData] = useState<Dataset[]>([]);
   const [total, setTotal] = useState(0);
   const [page, setPage] = useState(1);
@@ -18,22 +22,28 @@ export function DatasetsPage() {
   const [loading, setLoading] = useState(false);
   const [open, setOpen] = useState(false);
   const [form] = Form.useForm();
+  const [hasLoadedOnce, setHasLoadedOnce] = useState(false);
 
   const load = useCallback(async () => {
     const rid = nextLoadId();
+    const signal = nextSignal();
     setLoading(true);
     try {
-      const res = await listDatasets({ page, page_size: pageSize });
+      const res = await listDatasets({ page, page_size: pageSize }, { signal });
       if (!isLoadCurrent(rid)) return;
       setData(res.items as Dataset[]);
       setTotal(res.total);
     } catch (e) {
+      if (isRequestAborted(e)) return;
       if (!isLoadCurrent(rid)) return;
       message.error((e as Error).message);
     } finally {
-      if (isLoadCurrent(rid)) setLoading(false);
+      if (isLoadCurrent(rid)) {
+        setLoading(false);
+        setHasLoadedOnce(true);
+      }
     }
-  }, [message, page, pageSize, nextLoadId, isLoadCurrent]);
+  }, [message, page, pageSize, nextLoadId, isLoadCurrent, nextSignal]);
 
   useEffect(() => {
     void load();
@@ -128,23 +138,27 @@ export function DatasetsPage() {
           新建数据集
         </Button>
       </div>
-      <Table<Dataset>
-        rowKey="id"
-        size="small"
-        loading={loading}
-        columns={columns}
-        dataSource={data}
-        pagination={{
-          current: page,
-          pageSize,
-          total,
-          showSizeChanger: true,
-          onChange: (p, ps) => {
-            setPage(p);
-            setPageSize(ps);
-          },
-        }}
-      />
+      {!hasLoadedOnce && loading ? (
+        <PageTableSkeleton rows={7} />
+      ) : (
+        <Table<Dataset>
+          rowKey="id"
+          size="small"
+          loading={loading}
+          columns={columns}
+          dataSource={data}
+          pagination={{
+            current: page,
+            pageSize,
+            total,
+            showSizeChanger: true,
+            onChange: (p, ps) => {
+              setPage(p);
+              setPageSize(ps);
+            },
+          }}
+        />
+      )}
       <Modal
         title="新建数据集"
         open={open}

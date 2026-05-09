@@ -1,15 +1,19 @@
 import { PlusOutlined } from "@ant-design/icons";
 import { App, Button, Form, Input, Modal, Select, Table, Tabs, Typography } from "antd";
+import { PageTableSkeleton } from "../components/PageTableSkeleton";
 import type { ColumnsType } from "antd/es/table";
 import dayjs from "dayjs";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { createMetric, listMethods, listMetrics } from "../api/api";
+import { isRequestAborted } from "../api/client";
 import type { EvaluationMethod, MetricDefinition } from "../api/types";
+import { useAbortableRequest } from "../hooks/useAbortableRequest";
 import { useLoadRequestId } from "../hooks/useLoadRequestId";
 
 export function MetricsPage() {
   const { message } = App.useApp();
   const { next: nextLoadId, isCurrent: isLoadCurrent } = useLoadRequestId();
+  const nextSignal = useAbortableRequest();
   const [methods, setMethods] = useState<EvaluationMethod[]>([]);
   const [metrics, setMetrics] = useState<MetricDefinition[]>([]);
   const [total, setTotal] = useState(0);
@@ -18,26 +22,32 @@ export function MetricsPage() {
   const [loading, setLoading] = useState(false);
   const [open, setOpen] = useState(false);
   const [form] = Form.useForm();
+  const [hasLoadedOnce, setHasLoadedOnce] = useState(false);
 
   const load = useCallback(async () => {
     const rid = nextLoadId();
+    const signal = nextSignal();
     setLoading(true);
     try {
       const [mth, mt] = await Promise.all([
-        listMethods(),
-        listMetrics({ page, page_size: pageSize }),
+        listMethods({ signal }),
+        listMetrics({ page, page_size: pageSize }, { signal }),
       ]);
       if (!isLoadCurrent(rid)) return;
       setMethods(mth);
       setMetrics(mt.items);
       setTotal(mt.total);
     } catch (e) {
+      if (isRequestAborted(e)) return;
       if (!isLoadCurrent(rid)) return;
       message.error((e as Error).message);
     } finally {
-      if (isLoadCurrent(rid)) setLoading(false);
+      if (isLoadCurrent(rid)) {
+        setLoading(false);
+        setHasLoadedOnce(true);
+      }
     }
-  }, [message, page, pageSize, nextLoadId, isLoadCurrent]);
+  }, [message, page, pageSize, nextLoadId, isLoadCurrent, nextSignal]);
 
   useEffect(() => {
     void load();
@@ -108,7 +118,9 @@ export function MetricsPage() {
           {
             key: "methods",
             label: "评估方法",
-            children: (
+            children: !hasLoadedOnce && loading ? (
+              <PageTableSkeleton rows={5} />
+            ) : (
               <Table<EvaluationMethod>
                 rowKey="id"
                 size="small"
@@ -143,23 +155,27 @@ export function MetricsPage() {
                     自定义指标
                   </Button>
                 </div>
-                <Table<MetricDefinition>
-                  rowKey="id"
-                  size="small"
-                  loading={loading}
-                  columns={metricColumns}
-                  dataSource={metrics}
-                  pagination={{
-                    current: page,
-                    pageSize,
-                    total,
-                    showSizeChanger: true,
-                    onChange: (p, ps) => {
-                      setPage(p);
-                      setPageSize(ps);
-                    },
-                  }}
-                />
+                {!hasLoadedOnce && loading ? (
+                  <PageTableSkeleton rows={6} />
+                ) : (
+                  <Table<MetricDefinition>
+                    rowKey="id"
+                    size="small"
+                    loading={loading}
+                    columns={metricColumns}
+                    dataSource={metrics}
+                    pagination={{
+                      current: page,
+                      pageSize,
+                      total,
+                      showSizeChanger: true,
+                      onChange: (p, ps) => {
+                        setPage(p);
+                        setPageSize(ps);
+                      },
+                    }}
+                  />
+                )}
               </>
             ),
           },
