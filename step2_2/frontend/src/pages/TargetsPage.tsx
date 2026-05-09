@@ -5,12 +5,15 @@ import dayjs from "dayjs";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { Link } from "react-router-dom";
 import { createTarget, deleteTarget, listTargets, updateTarget } from "../api/api";
+import { isRequestAborted } from "../api/client";
 import type { EvaluationTarget } from "../api/types";
+import { useAbortableRequest } from "../hooks/useAbortableRequest";
 import { useLoadRequestId } from "../hooks/useLoadRequestId";
 
 export function TargetsPage() {
   const { message, modal } = App.useApp();
   const { next: nextLoadId, isCurrent: isLoadCurrent } = useLoadRequestId();
+  const nextSignal = useAbortableRequest();
   const [data, setData] = useState<EvaluationTarget[]>([]);
   const [loading, setLoading] = useState(false);
   const [open, setOpen] = useState(false);
@@ -19,18 +22,20 @@ export function TargetsPage() {
 
   const load = useCallback(async () => {
     const rid = nextLoadId();
+    const signal = nextSignal();
     setLoading(true);
     try {
-      const items = await listTargets();
+      const items = await listTargets(undefined, { signal });
       if (!isLoadCurrent(rid)) return;
       setData(items);
     } catch (e) {
+      if (isRequestAborted(e)) return;
       if (!isLoadCurrent(rid)) return;
       message.error((e as Error).message);
     } finally {
       if (isLoadCurrent(rid)) setLoading(false);
     }
-  }, [message, nextLoadId, isLoadCurrent]);
+  }, [message, nextLoadId, isLoadCurrent, nextSignal]);
 
   useEffect(() => {
     void load();

@@ -1,5 +1,7 @@
 import { App, Button, Card, Form, Input, InputNumber, Select, Space } from "antd";
 import { useEffect, useState } from "react";
+import { isRequestAborted } from "../api/client";
+import { useAbortableRequest } from "../hooks/useAbortableRequest";
 import { useNavigate, useParams } from "react-router-dom";
 import {
   createTask,
@@ -25,6 +27,7 @@ export function TaskFormPage() {
   const [datasets, setDatasets] = useState<{ label: string; value: number }[]>([]);
   const [methods, setMethods] = useState<EvaluationMethod[]>([]);
   const [metrics, setMetrics] = useState<MetricDefinition[]>([]);
+  const nextSignal = useAbortableRequest();
 
   useEffect(() => {
     let cancelled = false;
@@ -33,14 +36,15 @@ export function TaskFormPage() {
     if (editing) setLoading(true);
 
     const run = async () => {
+      const signal = nextSignal();
       try {
         const listsP = Promise.all([
-          listTargets({ enabled: true }),
-          listDatasets({ page: 1, page_size: 200 }),
-          listMethods(),
-          listMetrics({ page: 1, page_size: 200 }),
+          listTargets({ enabled: true }, { signal }),
+          listDatasets({ page: 1, page_size: 200 }, { signal }),
+          listMethods({ signal }),
+          listMetrics({ page: 1, page_size: 200 }, { signal }),
         ]);
-        const taskP = editing ? getTask(id) : Promise.resolve(null);
+        const taskP = editing ? getTask(id, { signal }) : Promise.resolve(null);
         const [[ts, ds, ms, mt], task] = await Promise.all([listsP, taskP]);
         if (cancelled) return;
         setTargetList(ts);
@@ -69,6 +73,7 @@ export function TaskFormPage() {
           });
         }
       } catch (e) {
+        if (isRequestAborted(e)) return;
         if (!cancelled) message.error((e as Error).message);
       } finally {
         if (!cancelled && editing) setLoading(false);
@@ -79,7 +84,7 @@ export function TaskFormPage() {
     return () => {
       cancelled = true;
     };
-  }, [taskId, form, message]);
+  }, [taskId, form, message, nextSignal]);
 
   const onTargetChange = (tid: number) => {
     const full = targetList.find((x) => x.id === tid);

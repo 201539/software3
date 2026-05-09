@@ -10,7 +10,9 @@ import {
   getDataset,
   listDatasetSamples,
 } from "../api/api";
+import { isRequestAborted } from "../api/client";
 import type { Dataset, DatasetSample } from "../api/types";
+import { useAbortableRequest } from "../hooks/useAbortableRequest";
 import { useLoadRequestId } from "../hooks/useLoadRequestId";
 
 const SAMPLE_TYPES = [
@@ -30,6 +32,7 @@ export function DatasetDetailPage() {
   const navigate = useNavigate();
   const { message, modal } = App.useApp();
   const { next: nextLoadId, isCurrent: isLoadCurrent } = useLoadRequestId();
+  const nextSignal = useAbortableRequest();
   const [dataset, setDataset] = useState<Dataset | null>(null);
   const [samples, setSamples] = useState<DatasetSample[]>([]);
   const [total, setTotal] = useState(0);
@@ -42,23 +45,25 @@ export function DatasetDetailPage() {
   const load = useCallback(async () => {
     if (Number.isNaN(id)) return;
     const rid = nextLoadId();
+    const signal = nextSignal();
     setLoading(true);
     try {
       const [d, s] = await Promise.all([
-        getDataset(id),
-        listDatasetSamples(id, { page, page_size: pageSize }),
+        getDataset(id, { signal }),
+        listDatasetSamples(id, { page, page_size: pageSize }, { signal }),
       ]);
       if (!isLoadCurrent(rid)) return;
       setDataset(d);
       setSamples(s.items as DatasetSample[]);
       setTotal(s.total);
     } catch (e) {
+      if (isRequestAborted(e)) return;
       if (!isLoadCurrent(rid)) return;
       message.error((e as Error).message);
     } finally {
       if (isLoadCurrent(rid)) setLoading(false);
     }
-  }, [id, message, page, pageSize, nextLoadId, isLoadCurrent]);
+  }, [id, message, page, pageSize, nextLoadId, isLoadCurrent, nextSignal]);
 
   useEffect(() => {
     void load();

@@ -4,12 +4,15 @@ import type { ColumnsType } from "antd/es/table";
 import dayjs from "dayjs";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { createMetric, listMethods, listMetrics } from "../api/api";
+import { isRequestAborted } from "../api/client";
 import type { EvaluationMethod, MetricDefinition } from "../api/types";
+import { useAbortableRequest } from "../hooks/useAbortableRequest";
 import { useLoadRequestId } from "../hooks/useLoadRequestId";
 
 export function MetricsPage() {
   const { message } = App.useApp();
   const { next: nextLoadId, isCurrent: isLoadCurrent } = useLoadRequestId();
+  const nextSignal = useAbortableRequest();
   const [methods, setMethods] = useState<EvaluationMethod[]>([]);
   const [metrics, setMetrics] = useState<MetricDefinition[]>([]);
   const [total, setTotal] = useState(0);
@@ -21,23 +24,25 @@ export function MetricsPage() {
 
   const load = useCallback(async () => {
     const rid = nextLoadId();
+    const signal = nextSignal();
     setLoading(true);
     try {
       const [mth, mt] = await Promise.all([
-        listMethods(),
-        listMetrics({ page, page_size: pageSize }),
+        listMethods({ signal }),
+        listMetrics({ page, page_size: pageSize }, { signal }),
       ]);
       if (!isLoadCurrent(rid)) return;
       setMethods(mth);
       setMetrics(mt.items);
       setTotal(mt.total);
     } catch (e) {
+      if (isRequestAborted(e)) return;
       if (!isLoadCurrent(rid)) return;
       message.error((e as Error).message);
     } finally {
       if (isLoadCurrent(rid)) setLoading(false);
     }
-  }, [message, page, pageSize, nextLoadId, isLoadCurrent]);
+  }, [message, page, pageSize, nextLoadId, isLoadCurrent, nextSignal]);
 
   useEffect(() => {
     void load();

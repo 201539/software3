@@ -5,13 +5,16 @@ import dayjs from "dayjs";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { Link } from "react-router-dom";
 import { deleteTask, listTasks } from "../api/api";
+import { isRequestAborted } from "../api/client";
 import type { EvaluationTask, TaskStatus } from "../api/types";
+import { useAbortableRequest } from "../hooks/useAbortableRequest";
 import { useLoadRequestId } from "../hooks/useLoadRequestId";
 import { TASK_STATUS_OPTIONS, TaskStatusTag } from "../utils/status";
 
 export function TaskListPage() {
   const { message, modal } = App.useApp();
   const { next: nextLoadId, isCurrent: isLoadCurrent } = useLoadRequestId();
+  const nextSignal = useAbortableRequest();
   const [loading, setLoading] = useState(false);
   const [data, setData] = useState<EvaluationTask[]>([]);
   const [total, setTotal] = useState(0);
@@ -21,24 +24,29 @@ export function TaskListPage() {
 
   const load = useCallback(async () => {
     const rid = nextLoadId();
+    const signal = nextSignal();
     setLoading(true);
     try {
-      const res = await listTasks({
-        name: filters.name || undefined,
-        status: filters.status,
-        page,
-        page_size: pageSize,
-      });
+      const res = await listTasks(
+        {
+          name: filters.name || undefined,
+          status: filters.status,
+          page,
+          page_size: pageSize,
+        },
+        { signal },
+      );
       if (!isLoadCurrent(rid)) return;
       setData(res.items as EvaluationTask[]);
       setTotal(res.total);
     } catch (e) {
+      if (isRequestAborted(e)) return;
       if (!isLoadCurrent(rid)) return;
       message.error((e as Error).message);
     } finally {
       if (isLoadCurrent(rid)) setLoading(false);
     }
-  }, [filters.name, filters.status, page, pageSize, message, nextLoadId, isLoadCurrent]);
+  }, [filters.name, filters.status, page, pageSize, message, nextLoadId, isLoadCurrent, nextSignal]);
 
   useEffect(() => {
     void load();

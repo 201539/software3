@@ -1,6 +1,11 @@
-import axios from "axios";
+import axios, { isAxiosError } from "axios";
 
 const baseURL = import.meta.env.VITE_API_BASE?.replace(/\/$/, "") ?? "/api/v1";
+
+/** 请求被 AbortController 取消（快速翻页、切换路由等） */
+export function isRequestAborted(err: unknown): boolean {
+  return isAxiosError(err) && err.code === "ERR_CANCELED";
+}
 
 export const http = axios.create({
   baseURL,
@@ -19,6 +24,9 @@ http.interceptors.request.use((config) => {
 http.interceptors.response.use(
   (r) => r,
   (err) => {
+    if (isAxiosError(err) && err.code === "ERR_CANCELED") {
+      return Promise.reject(err);
+    }
     const data = err.response?.data as { detail?: unknown } | string | undefined;
     let msg: string = err.message;
     if (typeof data === "string") msg = data;

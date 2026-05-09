@@ -3,12 +3,15 @@ import type { ColumnsType } from "antd/es/table";
 import ReactECharts from "echarts-for-react";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { compareAnalysis, listMetrics, listTasks } from "../api/api";
+import { isRequestAborted } from "../api/client";
 import type { AnalysisCompareResult, EvaluationTask, MetricDefinition } from "../api/types";
+import { useAbortableRequest } from "../hooks/useAbortableRequest";
 import { useLoadRequestId } from "../hooks/useLoadRequestId";
 
 export function ComparePage() {
   const { message } = App.useApp();
   const { next: nextLoadId, isCurrent: isLoadCurrent } = useLoadRequestId();
+  const nextSignal = useAbortableRequest();
   const [tasks, setTasks] = useState<EvaluationTask[]>([]);
   const [metrics, setMetrics] = useState<MetricDefinition[]>([]);
   const [result, setResult] = useState<AnalysisCompareResult | null>(null);
@@ -17,35 +20,41 @@ export function ComparePage() {
 
   const boot = useCallback(async () => {
     const rid = nextLoadId();
+    const signal = nextSignal();
     try {
       const [t, m] = await Promise.all([
-        listTasks({ page: 1, page_size: 200 }),
-        listMetrics({ page: 1, page_size: 200 }),
+        listTasks({ page: 1, page_size: 200 }, { signal }),
+        listMetrics({ page: 1, page_size: 200 }, { signal }),
       ]);
       if (!isLoadCurrent(rid)) return;
       setTasks(t.items as EvaluationTask[]);
       setMetrics(m.items);
     } catch (e) {
+      if (isRequestAborted(e)) return;
       if (!isLoadCurrent(rid)) return;
       message.error((e as Error).message);
     }
-  }, [message, nextLoadId, isLoadCurrent]);
+  }, [message, nextLoadId, isLoadCurrent, nextSignal]);
 
   useEffect(() => {
     void boot();
   }, [boot]);
 
   const onFinish = async (v: { task_ids: number[]; metric_keys: string[] }) => {
+    const signal = nextSignal();
     setLoading(true);
     try {
-      const res = await compareAnalysis({
-        task_ids: v.task_ids,
-        metric_keys: v.metric_keys,
-      });
+      const res = await compareAnalysis(
+        {
+          task_ids: v.task_ids,
+          metric_keys: v.metric_keys,
+        },
+        { signal },
+      );
       setResult(res);
       message.success("分析完成");
     } catch (e) {
-      message.error((e as Error).message);
+      if (!isRequestAborted(e)) message.error((e as Error).message);
     } finally {
       setLoading(false);
     }
