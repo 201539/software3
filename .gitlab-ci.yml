@@ -1,6 +1,6 @@
 # Agent 评估平台（step2_2）— GitLab CI
-# Runner：Docker executor；需能拉 node / python 官方镜像（内网可换镜像仓库前缀）
-# 与项目 Runner #590（仅 tag: linux）及共享 Runner（docker+linux）对齐，避免作业一直 Pending
+# Runner：Docker executor（学校）或本机 Shell（无 Docker）；本机 Shell 请用 Git Bash（见 ci/gitlab-runner-shell-windows.toml.example）
+# 与项目 Runner #590（仅 tag: linux）及共享 Runner（docker+linux）对齐；本机 Runner 同样打 tag: linux 即可接同一套 job
 
 default:
   interruptible: true
@@ -42,6 +42,12 @@ eval:backend:
   script:
     - cd step2_2/backend
     - python -m venv .venv-ci
-    - .venv-ci/bin/pip install -U pip wheel
-    - .venv-ci/bin/pip install -r requirements.txt
-    - .venv-ci/bin/python -m compileall -q app
+    # Linux venv: .venv-ci/bin/python；Windows venv: .venv-ci/Scripts/python.exe（Shell executor 无 Docker 时用后者）
+    - |
+      set -e
+      if [ -x .venv-ci/bin/python ]; then PY=.venv-ci/bin/python
+      elif [ -x .venv-ci/Scripts/python.exe ]; then PY=.venv-ci/Scripts/python.exe
+      else echo "venv python not found" >&2; exit 1; fi
+      "$PY" -m pip install -U pip wheel
+      "$PY" -m pip install -r requirements.txt
+      "$PY" -m compileall -q app

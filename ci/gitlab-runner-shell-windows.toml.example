@@ -1,0 +1,24 @@
+# GitLab Runner：Windows + Shell executor + 构建目录在 F 盘
+# 用法：复制为 gitlab-runner 安装目录下的 config.toml 片段，或合并进现有 config.toml；
+#       把 url、token、builds_dir 等改成你自己的；不要用示例 token 提交到仓库。
+
+concurrent = 1
+
+[[runners]]
+  name = "windows-shell-f"
+  url = "http://你的-gitlab-地址/"
+  token = "从网页「新建项目 runner」复制，勿提交到 git"
+  executor = "shell"
+  # 必须：与仓库 .gitlab-ci.yml 中跨平台脚本一致（bash）；需已安装 Git for Windows
+  shell = "bash"
+  tags = ["linux"]
+  builds_dir = "F:\\gitlab-runner-builds"
+  cache_dir = "F:\\gitlab-runner-cache"
+  # 若服务里找不到 node/python，把安装路径写进 PATH（按你本机实际改）
+  environment = [
+    "PATH=F:\\nodejs;F:\\Python312;F:\\Python312\\Scripts;C:\\Program Files\\Git\\bin;C:\\Program Files\\Git\\usr\\bin",
+    "PIP_CACHE_DIR=F:\\pip-cache",
+    "NPM_CONFIG_CACHE=F:\\npm-cache",
+  ]
+  [runners.custom_build_dir]
+    enabled = true
