@@ -1,8 +1,11 @@
 # Agent 评估平台（step2_2）— GitLab CI
 # Runner：Docker executor；需能拉 node / python 官方镜像（内网可换镜像仓库前缀）
+# 与项目 Runner #590（仅 tag: linux）及共享 Runner（docker+linux）对齐，避免作业一直 Pending
 
 default:
   interruptible: true
+  tags:
+    - linux
 
 stages:
   - build
