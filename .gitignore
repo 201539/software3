@@ -17,6 +17,8 @@ step2/文档/
 *.env
 **/.env
 step2_2/backend/.env
+step2_2/backend/.venv_smoke/
+step2_2/backend/eval_smoke*.db
 step2_2/frontend/node_modules/
 step2_2/frontend/dist/
 step2_2/运行指令.md

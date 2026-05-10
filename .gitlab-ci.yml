@@ -1,0 +1,44 @@
+# Agent 评估平台（step2_2）— GitLab CI
+# Runner：Docker executor；需能拉 node / python 官方镜像（内网可换镜像仓库前缀）
+
+default:
+  interruptible: true
+
+stages:
+  - build
+
+variables:
+  PIP_DISABLE_PIP_VERSION_CHECK: "1"
+  PYTHONUNBUFFERED: "1"
+  PIP_CACHE_DIR: "$CI_PROJECT_DIR/.cache/pip"
+  NPM_CONFIG_CACHE: "$CI_PROJECT_DIR/.npm"
+
+eval:frontend:
+  stage: build
+  image: node:20-bookworm-slim
+  cache:
+    key:
+      files:
+        - step2_2/frontend/package-lock.json
+    paths:
+      - .npm/
+  script:
+    - cd step2_2/frontend
+    - npm ci
+    - npm run build
+
+eval:backend:
+  stage: build
+  image: python:3.12-bookworm
+  cache:
+    key:
+      files:
+        - step2_2/backend/requirements.txt
+    paths:
+      - .cache/pip/
+  script:
+    - cd step2_2/backend
+    - python -m venv .venv-ci
+    - .venv-ci/bin/pip install -U pip wheel
+    - .venv-ci/bin/pip install -r requirements.txt
+    - .venv-ci/bin/python -m compileall -q app
