@@ -11,6 +11,8 @@ ragas/
 
 # local experimental folders
 pwpython/
+aicoding/
+step2/
 step2/文档/
 # env files
 .env
