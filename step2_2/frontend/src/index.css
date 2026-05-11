@@ -1,0 +1,97 @@
+* {
+  box-sizing: border-box;
+}
+
+html,
+body,
+#root {
+  height: 100%;
+  margin: 0;
+}
+
+body {
+  font-family:
+    "Segoe UI",
+    system-ui,
+    -apple-system,
+    "PingFang SC",
+    "Hiragino Sans GB",
+    "Microsoft YaHei",
+    sans-serif;
+  background: #eceef1;
+  color: #1a1d24;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+:root {
+  --ide-mono: ui-monospace, "Cascadia Code", "SF Mono", Consolas, "Liberation Mono", Menlo, monospace;
+  --ide-panel: #fafbfc;
+  --ide-terminal-bg: #1e1e1e;
+  --ide-terminal-fg: #d4d4d4;
+  --ide-terminal-muted: #858585;
+  --ide-toolbar-border: #e1e4e8;
+}
+
+.app-page-card {
+  position: relative;
+}
+
+/* 工具栏：贴近 IDE 顶栏分区 */
+.ide-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  padding-bottom: 12px;
+  margin-bottom: 16px;
+  border-bottom: 1px solid var(--ide-toolbar-border);
+}
+
+/* JSON / 日志等等宽内容 */
+.ide-mono {
+  font-family: var(--ide-mono);
+  font-size: 12px;
+  line-height: 1.45;
+}
+
+/* 终端式事件流 */
+.ide-terminal {
+  max-height: 220px;
+  overflow: auto;
+  padding: 10px 12px;
+  border-radius: 6px;
+  background: var(--ide-terminal-bg);
+  color: var(--ide-terminal-fg);
+  border: 1px solid #2d2d2d;
+}
+
+.ide-terminal .ant-list-item {
+  border-block-end-color: rgba(255, 255, 255, 0.06) !important;
+  padding: 8px 0 !important;
+}
+
+.ide-terminal .ant-typography {
+  color: var(--ide-terminal-fg) !important;
+}
+
+.ide-terminal .ant-typography-secondary {
+  color: var(--ide-terminal-muted) !important;
+}
+
+/* 卡片式 Tab，略扁、偏工作台 */
+.ide-tabs.ant-tabs-card > .ant-tabs-nav .ant-tabs-tab {
+  padding: 6px 14px !important;
+  font-size: 13px;
+  background: var(--ide-panel) !important;
+  border-color: #e1e4e8 !important;
+}
+
+.ide-tabs.ant-tabs-card > .ant-tabs-nav .ant-tabs-tab-active {
+  background: #fff !important;
+  border-bottom-color: #fff !important;
+}
+
+.ant-table-small .ant-table-cell {
+  padding-block: 6px !important;
+}
