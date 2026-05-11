@@ -1,6 +1,7 @@
 # Agent 评估平台（step2_2）— GitLab CI
 # Runner：Docker executor（学校）或本机 Shell（无 Docker）；本机 Shell 请用 Git Bash（见 ci/gitlab-runner-shell-windows.toml.example）
 # 与项目 Runner #590（仅 tag: linux）及共享 Runner（docker+linux）对齐；本机 Runner 同样打 tag: linux 即可接同一套 job
+# 国内网络：npm / pip / Docker 基础镜像已走镜像源；Shell executor 会忽略 image，依赖机子预装 Node 与 Python
 
 default:
   interruptible: true
@@ -17,10 +18,14 @@ variables:
   NPM_CONFIG_CACHE: "$CI_PROJECT_DIR/.npm"
   # 国内 npm 镜像（npmmirror，原淘宝源）
   NPM_CONFIG_REGISTRY: "https://registry.npmmirror.com"
+  # 国内 PyPI（减轻 pip install 超时/失败；Shell executor 同样生效）
+  PIP_INDEX_URL: "https://pypi.tuna.tsinghua.edu.cn/simple"
+  PIP_TRUSTED_HOST: "pypi.tuna.tsinghua.edu.cn"
 
 eval:frontend:
   stage: build
-  image: node:20-bookworm-slim
+  # DaoCloud 同步的 Docker Hub 官方镜像，减轻国内拉取失败/超时（executor=docker 时生效）
+  image: docker.m.daocloud.io/library/node:20-bookworm-slim
   cache:
     key:
       files:
@@ -34,7 +39,7 @@ eval:frontend:
 
 eval:backend:
   stage: build
-  image: python:3.12-bookworm
+  image: docker.m.daocloud.io/library/python:3.12-bookworm
   cache:
     key:
       files:
