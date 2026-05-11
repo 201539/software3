@@ -28,6 +28,7 @@ cache:
 default:
   image: node:20-alpine
   before_script:
+    - npm config set registry https://registry.npmmirror.com
     - cd "$AICODING_DIR"
     - npm ci
 
