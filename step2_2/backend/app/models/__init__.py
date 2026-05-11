@@ -3,6 +3,7 @@ from app.models.dataset import Dataset, DatasetSample
 from app.models.metric import EvaluationMethod, MetricDefinition, MetricResult
 from app.models.report import EvaluationReport
 from app.models.run import EvaluationRun, EvaluationSampleResult
+from app.models.target import EvaluationTarget
 from app.models.task import EvaluationTask
 from app.models.trace import EvaluationTrace, ToolCallLog
 
@@ -16,6 +17,7 @@ __all__ = [
     "EvaluationReport",
     "EvaluationRun",
     "EvaluationSampleResult",
+    "EvaluationTarget",
     "EvaluationTask",
     "EvaluationTrace",
     "ToolCallLog",

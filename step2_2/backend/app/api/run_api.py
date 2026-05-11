@@ -20,7 +20,7 @@ def create_run(payload: RunCreate, manager: RunManager = Depends(get_run_manager
     return manager.create_run(payload)
 
 
-@router.get("", response_model=PageResponse)
+@router.get("", response_model=PageResponse[EvaluationRunResponse])
 def list_runs(
     task_id: int | None = Query(default=None),
     status: str | None = Query(default=None),

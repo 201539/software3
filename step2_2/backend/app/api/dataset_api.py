@@ -21,7 +21,7 @@ def create_dataset(payload: DatasetCreate, manager: DatasetManager = Depends(get
     return manager.create_dataset(payload)
 
 
-@router.get("", response_model=PageResponse)
+@router.get("", response_model=PageResponse[DatasetResponse])
 def list_datasets(
     name: str | None = Query(default=None),
     status: str | None = Query(default=None),
@@ -84,7 +84,7 @@ def import_samples(
     return samples
 
 
-@router.get("/{dataset_id}/samples", response_model=PageResponse)
+@router.get("/{dataset_id}/samples", response_model=PageResponse[DatasetSampleResponse])
 def list_samples(
     dataset_id: int,
     page: int = Query(default=1, ge=1),

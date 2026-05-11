@@ -50,18 +50,26 @@ export function DatasetDetailPage() {
     const signal = nextSignal();
     setLoading(true);
     try {
-      const [d, s] = await Promise.all([
-        getDataset(id, { signal }),
-        listDatasetSamples(id, { page, page_size: pageSize }, { signal }),
-      ]);
+      const d = await getDataset(id, { signal });
       if (!isLoadCurrent(rid)) return;
       setDataset(d);
+    } catch (e) {
+      if (isRequestAborted(e)) return;
+      if (!isLoadCurrent(rid)) return;
+      message.error((e as Error).message);
+      setDataset(null);
+    }
+    try {
+      const s = await listDatasetSamples(id, { page, page_size: pageSize }, { signal });
+      if (!isLoadCurrent(rid)) return;
       setSamples(s.items as DatasetSample[]);
       setTotal(s.total);
     } catch (e) {
       if (isRequestAborted(e)) return;
       if (!isLoadCurrent(rid)) return;
       message.error((e as Error).message);
+      setSamples([]);
+      setTotal(0);
     } finally {
       if (isLoadCurrent(rid)) {
         setLoading(false);

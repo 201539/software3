@@ -1,13 +1,13 @@
 from sqlalchemy import BigInteger, JSON, String, Text
 from sqlalchemy.orm import Mapped, mapped_column
 
-from app.models.base import Base, TimestampMixin
+from app.models.base import Base, BigIntPK, TimestampMixin
 
 
 class Dataset(TimestampMixin, Base):
     __tablename__ = "dataset"
 
-    id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
+    id: Mapped[int] = mapped_column(BigIntPK, primary_key=True, autoincrement=True)
     dataset_code: Mapped[str] = mapped_column(String(64), unique=True, nullable=False)
     name: Mapped[str] = mapped_column(String(128), nullable=False)
     description: Mapped[str | None] = mapped_column(Text, nullable=True)
@@ -21,7 +21,7 @@ class Dataset(TimestampMixin, Base):
 class DatasetSample(TimestampMixin, Base):
     __tablename__ = "dataset_sample"
 
-    id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
+    id: Mapped[int] = mapped_column(BigIntPK, primary_key=True, autoincrement=True)
     dataset_id: Mapped[int] = mapped_column(BigInteger, nullable=False)
     sample_code: Mapped[str] = mapped_column(String(64), unique=True, nullable=False)
     input_payload: Mapped[dict] = mapped_column(JSON, nullable=False)

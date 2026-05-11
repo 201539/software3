@@ -1,4 +1,8 @@
+from typing import Generic, TypeVar
+
 from pydantic import BaseModel, ConfigDict
+
+T = TypeVar("T")
 
 
 class PageParams(BaseModel):
@@ -6,8 +10,10 @@ class PageParams(BaseModel):
     page_size: int = 20
 
 
-class PageResponse(BaseModel):
-    items: list
+class PageResponse(BaseModel, Generic[T]):
+    """分页响应；必须标注元素类型，否则 ORM 实例无法被 Pydantic 序列化为 JSON。"""
+
+    items: list[T]
     page: int
     page_size: int
     total: int

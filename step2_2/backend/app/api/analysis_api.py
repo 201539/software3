@@ -21,7 +21,7 @@ def compare_analysis(payload: AnalysisCompareRequest, manager: AnalysisManager =
     return manager.compare(payload)
 
 
-@router.get("", response_model=PageResponse)
+@router.get("", response_model=PageResponse[AnalysisCompareResponse])
 def list_analyses(
     page: int = Query(default=1, ge=1),
     page_size: int = Query(default=20, ge=1, le=200),

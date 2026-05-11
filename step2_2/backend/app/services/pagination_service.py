@@ -1,7 +1,5 @@
 from __future__ import annotations
 
-from math import ceil
-
 
 def paginate(items: list, page: int = 1, page_size: int = 20) -> dict:
     page = max(page, 1)
@@ -14,5 +12,4 @@ def paginate(items: list, page: int = 1, page_size: int = 20) -> dict:
         "page": page,
         "page_size": page_size,
         "total": total,
-        "total_pages": ceil(total / page_size) if total else 0,
     }

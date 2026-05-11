@@ -14,8 +14,8 @@ const menuItems = [
   { key: "/tasks", icon: <UnorderedListOutlined />, label: "评测任务" },
   { key: "/targets", icon: <DeploymentUnitOutlined />, label: "评测目标" },
   { key: "/datasets", icon: <DatabaseOutlined />, label: "数据集" },
-  { key: "/compare", icon: <BarChartOutlined />, label: "结果对比" },
   { key: "/metrics", icon: <ExperimentOutlined />, label: "方法与指标" },
+  { key: "/compare", icon: <BarChartOutlined />, label: "结果对比" },
 ];
 
 const sectionHints: Record<string, string> = {

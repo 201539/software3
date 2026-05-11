@@ -20,7 +20,7 @@ def list_methods(manager: MetricManager = Depends(get_metric_manager)):
     return manager.list_methods()
 
 
-@router.get("/metrics", response_model=PageResponse)
+@router.get("/metrics", response_model=PageResponse[MetricDefinitionResponse])
 def list_metrics(
     page: int = Query(default=1, ge=1),
     page_size: int = Query(default=20, ge=1, le=200),

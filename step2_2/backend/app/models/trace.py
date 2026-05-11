@@ -1,13 +1,13 @@
 from sqlalchemy import BigInteger, Integer, JSON, String, Text
 from sqlalchemy.orm import Mapped, mapped_column
 
-from app.models.base import Base, TimestampMixin
+from app.models.base import Base, BigIntPK, TimestampMixin
 
 
 class EvaluationTrace(TimestampMixin, Base):
     __tablename__ = "evaluation_trace"
 
-    id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
+    id: Mapped[int] = mapped_column(BigIntPK, primary_key=True, autoincrement=True)
     run_id: Mapped[int] = mapped_column(BigInteger, nullable=False)
     sample_id: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
     step_index: Mapped[int] = mapped_column(Integer, nullable=False)
@@ -21,7 +21,7 @@ class EvaluationTrace(TimestampMixin, Base):
 class ToolCallLog(TimestampMixin, Base):
     __tablename__ = "tool_call_log"
 
-    id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
+    id: Mapped[int] = mapped_column(BigIntPK, primary_key=True, autoincrement=True)
     run_id: Mapped[int] = mapped_column(BigInteger, nullable=False)
     sample_id: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
     tool_name: Mapped[str] = mapped_column(String(128), nullable=False)

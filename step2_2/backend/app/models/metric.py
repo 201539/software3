@@ -1,13 +1,13 @@
 from sqlalchemy import BigInteger, Boolean, JSON, Numeric, String, Text
 from sqlalchemy.orm import Mapped, mapped_column
 
-from app.models.base import Base, TimestampMixin
+from app.models.base import Base, BigIntPK, TimestampMixin
 
 
 class EvaluationMethod(TimestampMixin, Base):
     __tablename__ = "evaluation_method"
 
-    id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
+    id: Mapped[int] = mapped_column(BigIntPK, primary_key=True, autoincrement=True)
     method_code: Mapped[str] = mapped_column(String(64), unique=True, nullable=False)
     name: Mapped[str] = mapped_column(String(128), nullable=False)
     category: Mapped[str] = mapped_column(String(32), nullable=False)
@@ -19,7 +19,7 @@ class EvaluationMethod(TimestampMixin, Base):
 class MetricDefinition(TimestampMixin, Base):
     __tablename__ = "metric_definition"
 
-    id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
+    id: Mapped[int] = mapped_column(BigIntPK, primary_key=True, autoincrement=True)
     metric_code: Mapped[str] = mapped_column(String(64), unique=True, nullable=False)
     name: Mapped[str] = mapped_column(String(128), nullable=False)
     metric_type: Mapped[str] = mapped_column(String(32), nullable=False)
@@ -33,7 +33,7 @@ class MetricDefinition(TimestampMixin, Base):
 class MetricResult(TimestampMixin, Base):
     __tablename__ = "metric_result"
 
-    id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
+    id: Mapped[int] = mapped_column(BigIntPK, primary_key=True, autoincrement=True)
     run_id: Mapped[int] = mapped_column(BigInteger, nullable=False)
     sample_id: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
     metric_id: Mapped[int] = mapped_column(BigInteger, nullable=False)

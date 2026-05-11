@@ -21,7 +21,7 @@ def create_task(payload: EvaluationTaskCreate, manager: TaskManager = Depends(ge
     return task
 
 
-@router.get("", response_model=PageResponse)
+@router.get("", response_model=PageResponse[EvaluationTaskResponse])
 def list_tasks(
     name: str | None = Query(default=None),
     status: str | None = Query(default=None),

@@ -15,7 +15,7 @@ def get_trace_manager(db: Session = Depends(get_db)) -> TraceManager:
     return TraceManager(TraceRepository(db))
 
 
-@router.get("/evaluation-runs/{run_id}/traces", response_model=PageResponse)
+@router.get("/evaluation-runs/{run_id}/traces", response_model=PageResponse[TraceResponse])
 def list_traces(
     run_id: int,
     sample_id: int | None = Query(default=None),
@@ -40,7 +40,7 @@ def create_trace(payload: TraceCreate, manager: TraceManager = Depends(get_trace
     return manager.create_trace(payload)
 
 
-@router.get("/evaluation-runs/{run_id}/tool-calls", response_model=PageResponse)
+@router.get("/evaluation-runs/{run_id}/tool-calls", response_model=PageResponse[ToolCallLogResponse])
 def list_tool_calls(
     run_id: int,
     sample_id: int | None = Query(default=None),

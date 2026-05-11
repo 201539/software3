@@ -1,13 +1,13 @@
 from sqlalchemy import BigInteger, String, Text
 from sqlalchemy.orm import Mapped, mapped_column
 
-from app.models.base import Base, TimestampMixin
+from app.models.base import Base, BigIntPK, TimestampMixin
 
 
 class EvaluationReport(TimestampMixin, Base):
     __tablename__ = "evaluation_report"
 
-    id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
+    id: Mapped[int] = mapped_column(BigIntPK, primary_key=True, autoincrement=True)
     run_id: Mapped[int] = mapped_column(BigInteger, nullable=False)
     report_title: Mapped[str] = mapped_column(String(128), nullable=False)
     report_summary: Mapped[str | None] = mapped_column(Text, nullable=True)

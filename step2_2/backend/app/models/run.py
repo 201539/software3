@@ -3,13 +3,13 @@ from datetime import datetime
 from sqlalchemy import BigInteger, DateTime, ForeignKey, Integer, JSON, Numeric, String, Text
 from sqlalchemy.orm import Mapped, mapped_column
 
-from app.models.base import Base, TimestampMixin
+from app.models.base import Base, BigIntPK, TimestampMixin
 
 
 class EvaluationRun(TimestampMixin, Base):
     __tablename__ = "evaluation_run"
 
-    id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
+    id: Mapped[int] = mapped_column(BigIntPK, primary_key=True, autoincrement=True)
     run_code: Mapped[str] = mapped_column(String(64), unique=True, nullable=False)
     task_id: Mapped[int] = mapped_column(ForeignKey("evaluation_task.id"), nullable=False)
     status: Mapped[str] = mapped_column(String(32), nullable=False)
@@ -26,7 +26,7 @@ class EvaluationRun(TimestampMixin, Base):
 class EvaluationSampleResult(TimestampMixin, Base):
     __tablename__ = "evaluation_sample_result"
 
-    id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
+    id: Mapped[int] = mapped_column(BigIntPK, primary_key=True, autoincrement=True)
     run_id: Mapped[int] = mapped_column(ForeignKey("evaluation_run.id"), nullable=False)
     sample_id: Mapped[int] = mapped_column(ForeignKey("dataset_sample.id"), nullable=False)
     status: Mapped[str] = mapped_column(String(32), nullable=False)
