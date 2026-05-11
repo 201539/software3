@@ -11,10 +11,8 @@
     "allowJs": true,
     "checkJs": false,
     "noEmit": true,
-    "ignoreDeprecations": "6.0",
     "baseUrl": ".",
-    "allowImportingTsExtensions": true,
-    "ignoreDeprecations": "6.0"
+    "allowImportingTsExtensions": true
   },
   "include": ["apps/**/*", "packages/**/*", "server.js", "server.ts", "public/**/*"],
   "exclude": ["node_modules", "workspaces", "dist"]
