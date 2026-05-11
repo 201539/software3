@@ -51,13 +51,13 @@ default:
 verify:aicoding_ts:
   stage: verify
   script:
-    # lint 已含根 tsconfig + apps/web；与 typecheck 等价，避免重复跑 tsc
-    - npm --prefix "$AICODING_DIR" run lint
+    # default 已 cd 到 aicoding_ts；勿再用 --prefix "$AICODING_DIR"（相对路径会变成 aicoding_ts/aicoding_ts）
+    - npm run lint
 
 build:aicoding_ts:
   stage: build
   script:
-    - npm --prefix "$AICODING_DIR" run build:web
+    - npm run build:web
   artifacts:
     expire_in: 7 days
     paths:
