@@ -1,6 +1,6 @@
 # step2_2 Agent 评估 + aicoding_ts 校验/构建/部署
 # deploy 使用 apk/rsync/ssh，仅 Docker Runner 执行（tags: docker）；inherit 关闭 default 以免合并 linux 后被 Windows Shell 误接。
-# DEPLOY_SSH_KEY 建议使用 GitLab「文件」类型变量，避免多行密钥破坏 PowerShell 注入。
+# DEPLOY_SSH_KEY：务必用 GitLab「文件」类型变量（值仅为临时路径，不塞进 PowerShell 的 gitlab_runner_env），可消除 get_sources 阶段 ParserError。
 
 workflow:
   rules:
@@ -90,7 +90,10 @@ deploy:backend:
     - apk add --no-cache openssh-client rsync
     - mkdir -p ~/.ssh
     - chmod 700 ~/.ssh
-    - echo "$DEPLOY_SSH_KEY" | tr -d '\r' > ~/.ssh/id_rsa
+    # 文件型变量：$DEPLOY_SSH_KEY 为密钥文件路径；文本型（不推荐）：写入私钥内容
+    - |
+      if [ -f "${DEPLOY_SSH_KEY}" ]; then cp "${DEPLOY_SSH_KEY}" ~/.ssh/id_rsa
+      else printf '%s\n' "${DEPLOY_SSH_KEY}" | tr -d '\r' > ~/.ssh/id_rsa; fi
     - chmod 600 ~/.ssh/id_rsa
     - ssh-keyscan -H "$DEPLOY_HOST" >> ~/.ssh/known_hosts
   script:
@@ -119,7 +122,9 @@ deploy:frontend:
     - apk add --no-cache openssh-client rsync
     - mkdir -p ~/.ssh
     - chmod 700 ~/.ssh
-    - echo "$DEPLOY_SSH_KEY" | tr -d '\r' > ~/.ssh/id_rsa
+    - |
+      if [ -f "${DEPLOY_SSH_KEY}" ]; then cp "${DEPLOY_SSH_KEY}" ~/.ssh/id_rsa
+      else printf '%s\n' "${DEPLOY_SSH_KEY}" | tr -d '\r' > ~/.ssh/id_rsa; fi
     - chmod 600 ~/.ssh/id_rsa
     - ssh-keyscan -H "$DEPLOY_HOST" >> ~/.ssh/known_hosts
   script:
