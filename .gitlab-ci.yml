@@ -159,5 +159,5 @@ eval:backend:
     paths:
       - .cache/pip/
   script:
-    # PowerShell executor 下多行 bash 会失败，统一用 bash 跑脚本（需 Git for Windows）
-    - bash "$CI_PROJECT_DIR/ci/step2_2_eval_backend.sh"
+    # 勿用 "$CI_PROJECT_DIR/..."：Windows 路径反斜杠在 bash 中会坏；从仓库根用相对路径（job 起始 cwd 为项目根）
+    - bash ci/step2_2_eval_backend.sh

@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
-# step2_2 后端 CI：在 Windows Shell（PowerShell）executor 下由 GitLab 调用 bash 执行。
+# step2_2 后端 CI：在 Windows PowerShell executor 下由 Git Bash 执行。
+# 仓库根目录由脚本路径解析，避免 CI_PROJECT_DIR 反斜杠在 bash 中被当作转义（C:\Users → C:Users）。
 set -euo pipefail
-ROOT="${CI_PROJECT_DIR:-$(cd "$(dirname "$0")/.." && pwd)}"
+ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$ROOT/step2_2/backend"
 python -m venv .venv-ci
 if [ -x .venv-ci/bin/python ]; then PY=.venv-ci/bin/python
