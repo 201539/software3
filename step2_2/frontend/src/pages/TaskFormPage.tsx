@@ -12,7 +12,7 @@ import {
   listTargets,
   updateTask,
 } from "../api/api";
-import type { EvaluationMethod, EvaluationTarget, MetricDefinition, TaskStatus } from "../api/types";
+import type { EvaluationMethod, EvaluationTarget, MetricDefinition } from "../api/types";
 import { TASK_STATUS_OPTIONS } from "../utils/status";
 
 export function TaskFormPage() {
