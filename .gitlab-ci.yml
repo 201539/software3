@@ -1,29 +1,22 @@
-# step2_2 Agent 评估 + aicoding_ts 校验/构建/部署
-# 仅一台 Runner #590（Windows Shell）时：不要设置 DEPLOY_ENABLED，deploy job 不会进入流水线；eval:backend 依赖 Git Bash（见 ci/gitlab-runner-shell-windows.toml.example）。
-# 需要自动部署时：在 GitLab CI/CD 变量设置 DEPLOY_ENABLED=true，并登记带 docker 标签的 Docker executor；DEPLOY_SSH_KEY 建议用「文件」类型变量。
+# step2_2 Agent 评估 — 单机 Windows Shell Runner（#590）：仅 eval 两 job，与曾成功流水线一致。
+# aicoding_ts 校验/构建与 deploy 已移出本文件；需要时在本地或另配 Docker Runner 执行 npm run lint / build。
 
 workflow:
   rules:
     - if: $CI_PIPELINE_SOURCE == "merge_request_event"
       changes:
-        - aicoding_ts/**/*
         - step2_2/**/*
         - .gitlab-ci.yml
     - if: $CI_COMMIT_BRANCH
       changes:
-        - aicoding_ts/**/*
         - step2_2/**/*
         - .gitlab-ci.yml
     - when: never
 
 stages:
-  - verify
   - build
-  - deploy
 
 variables:
-  NODE_VERSION: "20"
-  AICODING_DIR: "aicoding_ts"
   PIP_DISABLE_PIP_VERSION_CHECK: "1"
   PYTHONUNBUFFERED: "1"
   PIP_CACHE_DIR: "$CI_PROJECT_DIR/.cache/pip"
@@ -32,110 +25,13 @@ variables:
   PIP_INDEX_URL: "https://pypi.tuna.tsinghua.edu.cn/simple"
   PIP_TRUSTED_HOST: "pypi.tuna.tsinghua.edu.cn"
 
-cache:
-  key: "${CI_PROJECT_NAME}-${CI_COMMIT_REF_SLUG}"
-  paths:
-    - aicoding_ts/node_modules/
-    - aicoding_ts/apps/web/dist/
-
 default:
   interruptible: true
   tags:
     - linux
-  image: docker.m.daocloud.io/library/node:20-alpine
-  before_script:
-    - npm config set registry https://registry.npmmirror.com
-    - cd "$AICODING_DIR"
-    - npm ci
 
-verify:aicoding_ts:
-  stage: verify
-  script:
-    # default 已 cd 到 aicoding_ts；勿再用 --prefix "$AICODING_DIR"（相对路径会变成 aicoding_ts/aicoding_ts）
-    - npm run lint
-
-build:aicoding_ts:
-  stage: build
-  script:
-    - npm run build:web
-  artifacts:
-    expire_in: 7 days
-    paths:
-      - aicoding_ts/apps/web/dist/
-
-# 需在 GitLab CI/CD 变量中配置：DEPLOY_HOST、DEPLOY_USER、DEPLOY_SSH_KEY、DEPLOY_PATH、DEPLOY_FRONTEND_PATH
-deploy:backend:
-  inherit:
-    default: false
-  interruptible: true
-  stage: deploy
-  image: docker.m.daocloud.io/library/node:20-alpine
-  tags:
-    - docker
-  rules:
-    - if: '$CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH && $DEPLOY_ENABLED == "true"'
-      changes:
-        - aicoding_ts/server.ts
-        - aicoding_ts/apps/runtime/**/*
-        - aicoding_ts/packages/**/*
-        - aicoding_ts/public/**/*
-        - aicoding_ts/apps/**/*
-        - aicoding_ts/package.json
-        - aicoding_ts/tsconfig.json
-        - .gitlab-ci.yml
-    - when: never
-  needs:
-    - verify:aicoding_ts
-    - build:aicoding_ts
-  before_script:
-    - apk add --no-cache openssh-client rsync
-    - mkdir -p ~/.ssh
-    - chmod 700 ~/.ssh
-    # 文件型变量：$DEPLOY_SSH_KEY 为密钥文件路径；文本型（不推荐）：写入私钥内容
-    - |
-      if [ -f "${DEPLOY_SSH_KEY}" ]; then cp "${DEPLOY_SSH_KEY}" ~/.ssh/id_rsa
-      else printf '%s\n' "${DEPLOY_SSH_KEY}" | tr -d '\r' > ~/.ssh/id_rsa; fi
-    - chmod 600 ~/.ssh/id_rsa
-    - ssh-keyscan -H "$DEPLOY_HOST" >> ~/.ssh/known_hosts
-  script:
-    - rsync -az --delete --exclude node_modules --exclude apps/web/dist --exclude .git aicoding_ts/ "$DEPLOY_USER@$DEPLOY_HOST:$DEPLOY_PATH/"
-    - ssh "$DEPLOY_USER@$DEPLOY_HOST" "cd '$DEPLOY_PATH' && npm config set registry https://registry.npmmirror.com && npm ci && npm run build:web && (pm2 restart software3 || pm2 start server.ts --name software3 --interpreter node --node-args='--experimental-strip-types')"
-
-deploy:frontend:
-  inherit:
-    default: false
-  interruptible: true
-  stage: deploy
-  image: docker.m.daocloud.io/library/node:20-alpine
-  tags:
-    - docker
-  rules:
-    - if: '$CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH && $DEPLOY_ENABLED == "true"'
-      changes:
-        - aicoding_ts/apps/web/**/*
-        - aicoding_ts/public/**/*
-        - aicoding_ts/package.json
-        - aicoding_ts/apps/web/tsconfig.build.json
-        - .gitlab-ci.yml
-    - when: never
-  needs:
-    - build:aicoding_ts
-  before_script:
-    - apk add --no-cache openssh-client rsync
-    - mkdir -p ~/.ssh
-    - chmod 700 ~/.ssh
-    - |
-      if [ -f "${DEPLOY_SSH_KEY}" ]; then cp "${DEPLOY_SSH_KEY}" ~/.ssh/id_rsa
-      else printf '%s\n' "${DEPLOY_SSH_KEY}" | tr -d '\r' > ~/.ssh/id_rsa; fi
-    - chmod 600 ~/.ssh/id_rsa
-    - ssh-keyscan -H "$DEPLOY_HOST" >> ~/.ssh/known_hosts
-  script:
-    - rsync -az --delete aicoding_ts/apps/web/dist/ "$DEPLOY_USER@$DEPLOY_HOST:$DEPLOY_FRONTEND_PATH/"
-
-# step2_2：不使用 default 的 before_script（避免 cd aicoding_ts / npm ci）
 eval:frontend:
   stage: build
-  before_script: []
   image: docker.m.daocloud.io/library/node:20-bookworm-slim
   cache:
     key:
@@ -150,7 +46,6 @@ eval:frontend:
 
 eval:backend:
   stage: build
-  before_script: []
   image: docker.m.daocloud.io/library/python:3.12-bookworm
   cache:
     key:
@@ -159,5 +54,16 @@ eval:backend:
     paths:
       - .cache/pip/
   script:
-    # 勿用 "$CI_PROJECT_DIR/..."：Windows 路径反斜杠在 bash 中会坏；从仓库根用相对路径（job 起始 cwd 为项目根）
-    - bash ci/step2_2_eval_backend.sh
+    - |
+      set -eu
+      cd step2_2/backend
+      if command -v python >/dev/null 2>&1; then python -m venv .venv-ci
+      elif command -v python3 >/dev/null 2>&1; then python3 -m venv .venv-ci
+      elif command -v py >/dev/null 2>&1; then py -3 -m venv .venv-ci
+      else echo "python not found (python / python3 / py)" >&2; exit 1; fi
+      if [ -x .venv-ci/bin/python ]; then PY=.venv-ci/bin/python
+      elif [ -x .venv-ci/Scripts/python.exe ]; then PY=.venv-ci/Scripts/python.exe
+      else echo "venv python not found" >&2; exit 1; fi
+      "$PY" -m pip install -U pip wheel
+      "$PY" -m pip install -r requirements.txt
+      "$PY" -m compileall -q app
