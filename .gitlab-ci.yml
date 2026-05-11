@@ -1,6 +1,6 @@
 # step2_2 Agent 评估 + aicoding_ts 校验/构建/部署
-# deploy 使用 apk/rsync/ssh，仅 Docker Runner 执行（tags: docker）；inherit 关闭 default 以免合并 linux 后被 Windows Shell 误接。
-# DEPLOY_SSH_KEY：务必用 GitLab「文件」类型变量（值仅为临时路径，不塞进 PowerShell 的 gitlab_runner_env），可消除 get_sources 阶段 ParserError。
+# 仅一台 Runner #590（Windows Shell）时：不要设置 DEPLOY_ENABLED，deploy job 不会进入流水线；eval:backend 依赖 Git Bash（见 ci/gitlab-runner-shell-windows.toml.example）。
+# 需要自动部署时：在 GitLab CI/CD 变量设置 DEPLOY_ENABLED=true，并登记带 docker 标签的 Docker executor；DEPLOY_SSH_KEY 建议用「文件」类型变量。
 
 workflow:
   rules:
@@ -73,7 +73,7 @@ deploy:backend:
   tags:
     - docker
   rules:
-    - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
+    - if: '$CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH && $DEPLOY_ENABLED == "true"'
       changes:
         - aicoding_ts/server.ts
         - aicoding_ts/apps/runtime/**/*
@@ -83,6 +83,7 @@ deploy:backend:
         - aicoding_ts/package.json
         - aicoding_ts/tsconfig.json
         - .gitlab-ci.yml
+    - when: never
   needs:
     - verify:aicoding_ts
     - build:aicoding_ts
@@ -109,13 +110,14 @@ deploy:frontend:
   tags:
     - docker
   rules:
-    - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
+    - if: '$CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH && $DEPLOY_ENABLED == "true"'
       changes:
         - aicoding_ts/apps/web/**/*
         - aicoding_ts/public/**/*
         - aicoding_ts/package.json
         - aicoding_ts/apps/web/tsconfig.build.json
         - .gitlab-ci.yml
+    - when: never
   needs:
     - build:aicoding_ts
   before_script:
@@ -157,13 +159,5 @@ eval:backend:
     paths:
       - .cache/pip/
   script:
-    - cd step2_2/backend
-    - python -m venv .venv-ci
-    - |
-      set -e
-      if [ -x .venv-ci/bin/python ]; then PY=.venv-ci/bin/python
-      elif [ -x .venv-ci/Scripts/python.exe ]; then PY=.venv-ci/Scripts/python.exe
-      else echo "venv python not found" >&2; exit 1; fi
-      "$PY" -m pip install -U pip wheel
-      "$PY" -m pip install -r requirements.txt
-      "$PY" -m compileall -q app
+    # PowerShell executor 下多行 bash 会失败，统一用 bash 跑脚本（需 Git for Windows）
+    - bash "$CI_PROJECT_DIR/ci/step2_2_eval_backend.sh"
