@@ -1,0 +1,2 @@
+# Shell scripts must use LF so Git Bash on Windows does not see stray CR (set: invalid option name).
+*.sh text eol=lf
