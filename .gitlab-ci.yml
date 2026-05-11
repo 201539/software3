@@ -1,30 +1,134 @@
-# Agent 评估平台（step2_2）— GitLab CI
-# Runner：Docker executor（学校）或本机 Shell（无 Docker）；本机 Shell 请用 Git Bash（见 ci/gitlab-runner-shell-windows.toml.example）
-# 与项目 Runner #590（仅 tag: linux）及共享 Runner（docker+linux）对齐；本机 Runner 同样打 tag: linux 即可接同一套 job
-# 国内网络：npm / pip / Docker 基础镜像已走镜像源；Shell executor 会忽略 image，依赖机子预装 Node 与 Python
+# step2_2 Agent 评估 + aicoding_ts 校验/构建/部署
+# deploy 使用 apk/rsync/ssh，仅 Docker Runner 执行（tags: docker）；inherit 关闭 default 以免合并 linux 后被 Windows Shell 误接。
+# DEPLOY_SSH_KEY 建议使用 GitLab「文件」类型变量，避免多行密钥破坏 PowerShell 注入。
+
+workflow:
+  rules:
+    - if: $CI_PIPELINE_SOURCE == "merge_request_event"
+      changes:
+        - aicoding_ts/**/*
+        - step2_2/**/*
+        - .gitlab-ci.yml
+    - if: $CI_COMMIT_BRANCH
+      changes:
+        - aicoding_ts/**/*
+        - step2_2/**/*
+        - .gitlab-ci.yml
+    - when: never
+
+stages:
+  - verify
+  - build
+  - deploy
+
+variables:
+  NODE_VERSION: "20"
+  AICODING_DIR: "aicoding_ts"
+  PIP_DISABLE_PIP_VERSION_CHECK: "1"
+  PYTHONUNBUFFERED: "1"
+  PIP_CACHE_DIR: "$CI_PROJECT_DIR/.cache/pip"
+  NPM_CONFIG_CACHE: "$CI_PROJECT_DIR/.npm"
+  NPM_CONFIG_REGISTRY: "https://registry.npmmirror.com"
+  PIP_INDEX_URL: "https://pypi.tuna.tsinghua.edu.cn/simple"
+  PIP_TRUSTED_HOST: "pypi.tuna.tsinghua.edu.cn"
+
+cache:
+  key: "${CI_PROJECT_NAME}-${CI_COMMIT_REF_SLUG}"
+  paths:
+    - aicoding_ts/node_modules/
+    - aicoding_ts/apps/web/dist/
 
 default:
   interruptible: true
   tags:
     - linux
+  image: docker.m.daocloud.io/library/node:20-alpine
+  before_script:
+    - npm config set registry https://registry.npmmirror.com
+    - cd "$AICODING_DIR"
+    - npm ci
 
-stages:
-  - build
+verify:aicoding_ts:
+  stage: verify
+  script:
+    - npm --prefix "$AICODING_DIR" run lint
+    - npm --prefix "$AICODING_DIR" run typecheck
 
-variables:
-  PIP_DISABLE_PIP_VERSION_CHECK: "1"
-  PYTHONUNBUFFERED: "1"
-  PIP_CACHE_DIR: "$CI_PROJECT_DIR/.cache/pip"
-  NPM_CONFIG_CACHE: "$CI_PROJECT_DIR/.npm"
-  # 国内 npm 镜像（npmmirror，原淘宝源）
-  NPM_CONFIG_REGISTRY: "https://registry.npmmirror.com"
-  # 国内 PyPI（减轻 pip install 超时/失败；Shell executor 同样生效）
-  PIP_INDEX_URL: "https://pypi.tuna.tsinghua.edu.cn/simple"
-  PIP_TRUSTED_HOST: "pypi.tuna.tsinghua.edu.cn"
+build:aicoding_ts:
+  stage: build
+  script:
+    - npm --prefix "$AICODING_DIR" run build:web
+  artifacts:
+    expire_in: 7 days
+    paths:
+      - aicoding_ts/apps/web/dist/
 
+# 需在 GitLab CI/CD 变量中配置：DEPLOY_HOST、DEPLOY_USER、DEPLOY_SSH_KEY、DEPLOY_PATH、DEPLOY_FRONTEND_PATH
+deploy:backend:
+  inherit:
+    default: false
+  interruptible: true
+  stage: deploy
+  image: docker.m.daocloud.io/library/node:20-alpine
+  tags:
+    - docker
+  rules:
+    - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
+      changes:
+        - aicoding_ts/server.ts
+        - aicoding_ts/apps/runtime/**/*
+        - aicoding_ts/packages/**/*
+        - aicoding_ts/public/**/*
+        - aicoding_ts/apps/**/*
+        - aicoding_ts/package.json
+        - aicoding_ts/tsconfig.json
+        - .gitlab-ci.yml
+  needs:
+    - verify:aicoding_ts
+    - build:aicoding_ts
+  before_script:
+    - apk add --no-cache openssh-client rsync
+    - mkdir -p ~/.ssh
+    - chmod 700 ~/.ssh
+    - echo "$DEPLOY_SSH_KEY" | tr -d '\r' > ~/.ssh/id_rsa
+    - chmod 600 ~/.ssh/id_rsa
+    - ssh-keyscan -H "$DEPLOY_HOST" >> ~/.ssh/known_hosts
+  script:
+    - rsync -az --delete --exclude node_modules --exclude apps/web/dist --exclude .git aicoding_ts/ "$DEPLOY_USER@$DEPLOY_HOST:$DEPLOY_PATH/"
+    - ssh "$DEPLOY_USER@$DEPLOY_HOST" "cd '$DEPLOY_PATH' && npm config set registry https://registry.npmmirror.com && npm ci && npm run build:web && (pm2 restart software3 || pm2 start server.ts --name software3 --interpreter node --node-args='--experimental-strip-types')"
+
+deploy:frontend:
+  inherit:
+    default: false
+  interruptible: true
+  stage: deploy
+  image: docker.m.daocloud.io/library/node:20-alpine
+  tags:
+    - docker
+  rules:
+    - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
+      changes:
+        - aicoding_ts/apps/web/**/*
+        - aicoding_ts/public/**/*
+        - aicoding_ts/package.json
+        - aicoding_ts/apps/web/tsconfig.build.json
+        - .gitlab-ci.yml
+  needs:
+    - build:aicoding_ts
+  before_script:
+    - apk add --no-cache openssh-client rsync
+    - mkdir -p ~/.ssh
+    - chmod 700 ~/.ssh
+    - echo "$DEPLOY_SSH_KEY" | tr -d '\r' > ~/.ssh/id_rsa
+    - chmod 600 ~/.ssh/id_rsa
+    - ssh-keyscan -H "$DEPLOY_HOST" >> ~/.ssh/known_hosts
+  script:
+    - rsync -az --delete aicoding_ts/apps/web/dist/ "$DEPLOY_USER@$DEPLOY_HOST:$DEPLOY_FRONTEND_PATH/"
+
+# step2_2：不使用 default 的 before_script（避免 cd aicoding_ts / npm ci）
 eval:frontend:
   stage: build
-  # DaoCloud 同步的 Docker Hub 官方镜像，减轻国内拉取失败/超时（executor=docker 时生效）
+  before_script: []
   image: docker.m.daocloud.io/library/node:20-bookworm-slim
   cache:
     key:
@@ -39,6 +143,7 @@ eval:frontend:
 
 eval:backend:
   stage: build
+  before_script: []
   image: docker.m.daocloud.io/library/python:3.12-bookworm
   cache:
     key:
@@ -49,7 +154,6 @@ eval:backend:
   script:
     - cd step2_2/backend
     - python -m venv .venv-ci
-    # Linux venv: .venv-ci/bin/python；Windows venv: .venv-ci/Scripts/python.exe（Shell executor 无 Docker 时用后者）
     - |
       set -e
       if [ -x .venv-ci/bin/python ]; then PY=.venv-ci/bin/python
