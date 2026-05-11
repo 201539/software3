@@ -14,9 +14,9 @@ concurrent = 1
   tags = ["linux"]
   builds_dir = "F:\\gitlab-runner-builds"
   cache_dir = "F:\\gitlab-runner-cache"
-  # 若服务里找不到 node/python，把安装路径写进 PATH（按你本机实际改）
+  # 若服务里找不到 node/python/git bash，把路径写进 PATH（Git 路径按你本机改，常见为 D:\\安装文件\\Git\\bin）
   environment = [
-    "PATH=F:\\nodejs;F:\\Python312;F:\\Python312\\Scripts;C:\\Program Files\\Git\\bin;C:\\Program Files\\Git\\usr\\bin",
+    "PATH=F:\\nodejs;F:\\Python312;F:\\Python312\\Scripts;D:\\安装文件\\Git\\bin;D:\\安装文件\\Git\\usr\\bin",
     "PIP_CACHE_DIR=F:\\pip-cache",
     "NPM_CONFIG_CACHE=F:\\npm-cache",
   ]
