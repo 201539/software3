@@ -197,6 +197,43 @@ export function startRuntimeServer() {
       return;
     }
 
+    // ── POST /api/external-mcp/servers（注册/同步外部 MCP 服务器）──
+    if (url.pathname === '/api/external-mcp/servers' && req.method === 'POST') {
+      try {
+        const { servers } = await parseBody<{ servers?: ExternalMcpServerConfig[] }>(req);
+        if (!Array.isArray(servers)) { sendJson(res, 400, { error: 'servers array required' }); return; }
+        for (const server of servers) {
+          if (server.enabled !== false && server.name) {
+            externalMcpRegistry.addServer(server);
+          }
+        }
+        const currentNames = new Set(servers.map((s) => s.name));
+        for (const server of externalMcpRegistry.listServers()) {
+          if (!currentNames.has(server.name)) {
+            externalMcpRegistry.removeServer(server.name);
+          }
+        }
+        sendJson(res, 200, { ok: true, servers: externalMcpRegistry.listServers() });
+      } catch (error: unknown) {
+        sendJson(res, 500, { error: error instanceof Error ? error.message : 'Unknown error' });
+      }
+      return;
+    }
+
+    // ── DELETE /api/external-mcp/servers/:name ──
+    if (url.pathname.startsWith('/api/external-mcp/servers/') && req.method === 'DELETE') {
+      const name = decodeURIComponent(url.pathname.replace('/api/external-mcp/servers/', ''));
+      externalMcpRegistry.removeServer(name);
+      sendJson(res, 200, { ok: true, name, servers: externalMcpRegistry.listServers() });
+      return;
+    }
+
+    // ── GET /api/external-mcp/servers ──
+    if (url.pathname === '/api/external-mcp/servers' && req.method === 'GET') {
+      sendJson(res, 200, { servers: externalMcpRegistry.listServers() });
+      return;
+    }
+
     // ── MCP 端点 ──
     if (url.pathname === '/mcp' && req.method === 'GET') {
       res.writeHead(200, sseHeaders());
@@ -440,7 +477,22 @@ export function startRuntimeServer() {
 
     // ── GET /api/tools ──
     if (url.pathname === '/api/tools' && req.method === 'GET') {
-      sendJson(res, 200, { tools: toolGateway.registry.getAllToolInfos() });
+      const localTools = toolGateway.registry.getAllToolInfos();
+      let externalTools: { name: string; description: string; source: string; enabled: boolean; callCount: number; successCount: number; avgDurationMs: number; lastCalledAt: string | null }[] = [];
+      try {
+        const extList = await externalMcpRegistry.listTools();
+        externalTools = extList.map((t) => ({
+          name: externalMcpRegistry.normalizeToolName(t.server, t.name),
+          description: t.description,
+          source: 'external' as const,
+          enabled: true,
+          callCount: 0,
+          successCount: 0,
+          avgDurationMs: 0,
+          lastCalledAt: null,
+        }));
+      } catch { /* external MCP not available */ }
+      sendJson(res, 200, { tools: [...localTools, ...externalTools] });
       return;
     }
 

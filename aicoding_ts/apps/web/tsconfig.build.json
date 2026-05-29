@@ -11,6 +11,6 @@
     "strict": true,
     "lib": ["ES2022", "DOM", "DOM.Iterable"]
   },
-  "include": ["app.ts"],
+  "include": ["app.ts", "mcp-config.ts"],
   "exclude": ["dist"]
 }

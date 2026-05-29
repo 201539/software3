@@ -95,16 +95,31 @@ function createHttpTransport(config: Extract<ExternalMcpServerConfig, { type: 'h
 }
 
 function createStdioTransport(config: Extract<ExternalMcpServerConfig, { type: 'stdio' }>): Transport {
-  const child = spawn(config.command, config.args ?? [], {
-    env: { ...(process.env as Record<string, string | undefined>), ...(config.env ?? {}) },
-    stdio: ['pipe', 'pipe', 'pipe'],
-  });
-
+  let child: ReturnType<typeof spawn> | null = null;
+  let initError: Error | null = null;
   let nextId = 1;
   const pending = new Map<string, { resolve: (value: unknown) => void; reject: (reason?: unknown) => void }>();
   let buffer = '';
 
-  child.stdout.on('data', (chunk: { toString(encoding?: string): string }) => {
+  function ensureChild() {
+    if (child) return child;
+    if (initError) throw initError;
+    try {
+      child = spawn(config.command, config.args ?? [], {
+        env: { ...(process.env as Record<string, string | undefined>), ...(config.env ?? {}) },
+        stdio: ['pipe', 'pipe', 'pipe'],
+        shell: true,
+      });
+    } catch (err) {
+      initError = err instanceof Error ? err : new Error(String(err));
+      throw initError;
+    }
+    child.on('error', (err) => { initError = err; child = null; });
+    child.on('exit', () => { child = null; });
+    return child;
+  }
+
+  const childStdout = (chunk: { toString(encoding?: string): string }) => {
     buffer += chunk.toString('utf8');
     let idx = buffer.indexOf('\n');
     while (idx >= 0) {
@@ -126,21 +141,22 @@ function createStdioTransport(config: Extract<ExternalMcpServerConfig, { type: '
       }
       idx = buffer.indexOf('\n');
     }
-  });
-
-  child.stderr.on('data', () => { /* ignore */ });
+  };
 
   function request(method: string, params?: unknown) {
     const id = String(nextId++);
+    const c = ensureChild();
+    c.stdout.on('data', childStdout);
+    c.stderr.on('data', () => { /* ignore */ });
     return new Promise<unknown>((resolve, reject) => {
       pending.set(id, { resolve, reject });
-      child.stdin.write(`${JSON.stringify({ jsonrpc: '2.0', id, method, params })}\n`);
+      c.stdin.write(`${JSON.stringify({ jsonrpc: '2.0', id, method, params })}\n`);
       setTimeout(() => {
         if (pending.has(id)) {
           pending.delete(id);
           reject(new Error(`MCP stdio request timeout: ${method}`));
         }
-      }, 30000);
+      }, 120000);
     });
   }
 
@@ -166,18 +182,34 @@ function createStdioTransport(config: Extract<ExternalMcpServerConfig, { type: '
 }
 
 export function createExternalMcpRegistry(configs: ExternalMcpServerConfig[]) {
-  const enabledConfigs = configs.filter((config) => config.enabled !== false && config.name);
+  const transports: Array<{ config: ExternalMcpServerConfig; transport: Transport }> = [];
 
-  const transports = enabledConfigs.map((config) => {
-    if (config.type === 'stdio') return { config, transport: createStdioTransport(config) };
-    return { config, transport: createHttpTransport(config) };
-  });
+  function addServer(config: ExternalMcpServerConfig) {
+    removeServer(config.name);
+    const transport = config.type === 'stdio' ? createStdioTransport(config) : createHttpTransport(config);
+    transports.push({ config, transport });
+  }
+
+  function removeServer(name: string) {
+    const idx = transports.findIndex((t) => t.config.name === name);
+    if (idx >= 0) transports.splice(idx, 1);
+  }
+
+  // Initialize from constructor configs
+  for (const config of configs) {
+    if (config.enabled !== false && config.name) addServer(config);
+  }
 
   return {
     async listTools(): Promise<ExternalMcpTool[]> {
       const all: ExternalMcpTool[] = [];
-      for (const { transport } of transports) {
-        all.push(...(await transport.listTools()));
+      for (const { transport, config } of transports) {
+        try {
+          const tools = await transport.listTools();
+          all.push(...tools);
+        } catch (err) {
+          console.error(`[mcp] listTools failed for ${config.name}:`, (err as Error).message);
+        }
       }
       return all;
     },
@@ -191,6 +223,11 @@ export function createExternalMcpRegistry(configs: ExternalMcpServerConfig[]) {
     },
     hasExternalTools() {
       return transports.length > 0;
+    },
+    addServer,
+    removeServer,
+    listServers() {
+      return transports.map((t) => ({ ...t.config }));
     },
     normalizeToolName,
   };

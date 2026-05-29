@@ -32,7 +32,7 @@ const argsInput = document.querySelector<HTMLTextAreaElement>('#mcpArgs')!;
 const headersInput = document.querySelector<HTMLTextAreaElement>('#mcpHeaders')!;
 const envInput = document.querySelector<HTMLTextAreaElement>('#mcpEnv')!;
 const enabledInput = document.querySelector<HTMLInputElement>('#mcpEnabled')!;
-const refreshBtn = document.querySelector<HTMLButtonElement>('#refreshMcpBtn')!;
+const refreshMcpListBtn = document.querySelector<HTMLButtonElement>('#refreshMcpBtn')!;
 const saveBtn = document.querySelector<HTMLButtonElement>('#saveMcpBtn')!;
 
 const STORAGE_KEY = 'externalMcpServers';
@@ -45,8 +45,32 @@ function loadConfigs(): ExternalMcpServerConfig[] {
   }
 }
 
-function saveConfigs(configs: ExternalMcpServerConfig[]) {
+async function saveConfigs(configs: ExternalMcpServerConfig[]) {
   localStorage.setItem(STORAGE_KEY, JSON.stringify(configs, null, 2));
+  try {
+    await fetch('/api/external-mcp/servers', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ servers: configs }),
+    });
+  } catch {
+    // 后端不可用时静默失败
+  }
+}
+
+async function loadServerConfigs(): Promise<ExternalMcpServerConfig[]> {
+  const localConfigs = loadConfigs();
+  // 静默同步到后端
+  if (localConfigs.length > 0) {
+    try {
+      await fetch('/api/external-mcp/servers', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ servers: localConfigs }),
+      });
+    } catch { /* 后端不可用不影响前端 */ }
+  }
+  return localConfigs;
 }
 
 function parseJson<T>(value: string, fallback: T): T {
@@ -80,8 +104,18 @@ function renderServerList(configs: ExternalMcpServerConfig[], tools: ExternalMcp
       <div class="mcp-server-meta">类型：${config.type}</div>
       <div class="mcp-server-meta">${config.type === 'http' ? config.url : config.command}</div>
       <div class="mcp-server-tools">${serverTools.length ? serverTools.map((tool) => `<span class="mcp-tool-pill">${tool.name}</span>`).join('') : '<span class="muted">未发现工具</span>'}</div>
+      <button class="mcp-delete-btn" data-name="${config.name}">删除</button>
     `;
-    card.addEventListener('click', () => loadToForm(config));
+    card.addEventListener('click', (e) => {
+      if ((e.target as HTMLElement).classList.contains('mcp-delete-btn')) return;
+      loadToForm(config);
+    });
+    card.querySelector<HTMLButtonElement>('.mcp-delete-btn')!.addEventListener('click', async (e) => {
+      e.stopPropagation();
+      const configs = loadConfigs().filter((c) => c.name !== config.name);
+      await saveConfigs(configs);
+      await render();
+    });
     serverList.appendChild(card);
   });
 }
@@ -121,9 +155,15 @@ async function refreshTools() {
 }
 
 async function render() {
-  const configs = loadConfigs();
-  const toolsRes = await refreshTools().catch(() => ({ tools: [] as ExternalMcpTool[] }));
-  renderServerList(configs, toolsRes.tools ?? []);
+  const configs = await loadServerConfigs();
+  // 先渲染 server 列表，工具加载不阻塞
+  renderServerList(configs, []);
+  try {
+    const toolsRes = await refreshTools();
+    renderServerList(configs, toolsRes.tools ?? []);
+  } catch {
+    // 工具加载失败，server 列表已显示
+  }
 }
 
 function buildConfig(): ExternalMcpServerConfig | null {
@@ -156,15 +196,15 @@ function buildConfig(): ExternalMcpServerConfig | null {
 }
 
 
-function upsertConfig(config: ExternalMcpServerConfig) {
+async function upsertConfig(config: ExternalMcpServerConfig) {
   const configs = loadConfigs();
   const index = configs.findIndex((item) => item.name === config.name);
   if (index >= 0) configs[index] = config;
   else configs.push(config);
-  saveConfigs(configs);
+  await saveConfigs(configs);
 }
 
-refreshBtn.addEventListener('click', () => {
+refreshMcpListBtn.addEventListener('click', () => {
   render();
 });
 
@@ -178,14 +218,14 @@ typeSelect.addEventListener('change', () => {
   toggleFields();
 });
 
-saveBtn.addEventListener('click', () => {
+saveBtn.addEventListener('click', async () => {
   const config = buildConfig();
   if (!config) {
     alert('请填写必要字段');
     return;
   }
-  upsertConfig(config);
-  render();
+  await upsertConfig(config);
+  await render();
 });
 
 form.addEventListener('submit', (event) => {
