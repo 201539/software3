@@ -1,4 +1,4 @@
-import { mkdir, readFile, readdir, unlink, writeFile } from 'node:fs/promises';
+import { mkdir, readFile, readdir, rm, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { DEFAULT_PROJECT_ID } from '../shared/index.ts';
 import type { Session, SessionMeta, TaskSummary, ChatMessage } from '../shared/types.ts';
@@ -106,6 +106,9 @@ export function createSessionStore(options: { projectId?: string } = {}) {
     sessionId: string;
     createdAt: string;
     updatedAt: string;
+    title: string;
+    archived: boolean;
+    messageCount: number;
     taskCount: number;
     lastMessage: string;
   }>> {
@@ -154,7 +157,7 @@ export function createSessionStore(options: { projectId?: string } = {}) {
 
   async function deleteSession(sessionId: string): Promise<boolean> {
     try {
-      await unlink(sessionPath(sessionId));
+      await rm(sessionPath(sessionId), { force: true });
       const currentId = await getCurrentSessionId();
       if (currentId === sessionId) {
         await writeFile(currentFile, JSON.stringify({ currentSessionId: null }, null, 2), 'utf8');

@@ -95,7 +95,8 @@ function createHttpTransport(config: Extract<ExternalMcpServerConfig, { type: 'h
 }
 
 function createStdioTransport(config: Extract<ExternalMcpServerConfig, { type: 'stdio' }>): Transport {
-  let child: ReturnType<typeof spawn> | null = null;
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  let child: any = null;
   let initError: Error | null = null;
   let nextId = 1;
   const pending = new Map<string, { resolve: (value: unknown) => void; reject: (reason?: unknown) => void }>();
@@ -109,12 +110,12 @@ function createStdioTransport(config: Extract<ExternalMcpServerConfig, { type: '
         env: { ...(process.env as Record<string, string | undefined>), ...(config.env ?? {}) },
         stdio: ['pipe', 'pipe', 'pipe'],
         shell: true,
-      });
+      } as Record<string, unknown>);
     } catch (err) {
       initError = err instanceof Error ? err : new Error(String(err));
       throw initError;
     }
-    child.on('error', (err) => { initError = err; child = null; });
+    child.on('error', (err: Error) => { initError = err; child = null; });
     child.on('exit', () => { child = null; });
     return child;
   }
