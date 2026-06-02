@@ -31,15 +31,15 @@ type Context = {
 };
 
 type ToolGateway = {
-  readFile: (path: string) => unknown;
-  writeFile: (path: string, content: string) => unknown;
-  runCommand: (command: string) => unknown;
-  listWorkspace: () => unknown[];
-  searchInWorkspace: (query: string, path?: string) => unknown;
-  patchFile: (path: string, patch: string) => unknown;
-  listVersions: () => unknown;
-  createSnapshot: (name?: string, description?: string) => unknown;
-  restoreSnapshot: (snapshotId: string) => unknown;
+  readFile: (...args: any[]) => unknown;
+  writeFile: (...args: any[]) => unknown;
+  runCommand: (...args: any[]) => unknown;
+  listWorkspace: (...args: any[]) => unknown;
+  searchInWorkspace: (...args: any[]) => unknown;
+  patchFile: (...args: any[]) => unknown;
+  listVersions: (...args: any[]) => unknown;
+  createSnapshot: (...args: any[]) => unknown;
+  restoreSnapshot: (...args: any[]) => unknown;
 };
 
 type SessionStore = {
