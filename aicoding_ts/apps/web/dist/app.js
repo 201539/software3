@@ -22,7 +22,13 @@ const failureDetail = document.querySelector('#failureDetail');
 const clearFailureBtn = document.querySelector('#clearFailureBtn');
 const statusTimeline = document.querySelector('#statusTimeline');
 const commandConfirmOverlay = document.querySelector('#commandConfirmOverlay');
-const commandConfirmCloseBtn = document.querySelector('#commandConfirmCloseBtn');
+const commandConfirmReason = document.querySelector('#commandConfirmReason');
+const commandConfirmRisk = document.querySelector('#commandConfirmRisk');
+const commandConfirmCwd = document.querySelector('#commandConfirmCwd');
+const commandConfirmText = document.querySelector('#commandConfirmText');
+const commandConfirmDenyBtn = document.querySelector('#commandConfirmDenyBtn');
+const commandConfirmOnceBtn = document.querySelector('#commandConfirmOnceBtn');
+const commandConfirmWhitelistBtn = document.querySelector('#commandConfirmWhitelistBtn');
 const refreshBtn = document.querySelector('#refreshBtn');
 const workspaceLayout = document.querySelector('#workspaceLayout');
 const newItemBtn = document.querySelector('#newItemBtn');
@@ -34,7 +40,6 @@ const newSessionBtn = document.querySelector('#newSessionBtn');
 const workspacePathInput = document.querySelector('#workspacePathInput');
 const workspaceSuggestList = document.querySelector('#workspaceSuggestList');
 const loadWorkspaceBtn = document.querySelector('#loadWorkspaceBtn');
-;
 let selectedFile = null;
 let currentFileContent = '';
 let workspaceCache = [];
@@ -50,6 +55,7 @@ let lastUserPrompt = null;
 let lastTaskPhase = 'idle';
 let lastTaskPhaseUpdatedAt = 0;
 let lastConfirmRequest = null;
+let lastCommandConfirmRequest = null;
 let showRawSummary = false;
 let lastFailureText = null;
 let statusHistory = [];
@@ -1707,6 +1713,12 @@ async function streamChat(prompt) {
                     renderWaitingUserPanel();
                     renderConfirmCard(event);
                 }
+                else if (event.type === 'command_confirm_request') {
+                    setAgentStatus('waiting_confirm');
+                    setTaskPhase('waiting_user', '等待命令确认');
+                    hideCommandConfirmOverlay();
+                    showCommandConfirmOverlay(event);
+                }
             }
             catch {
                 continue;
@@ -1991,9 +2003,58 @@ clearFailureBtn.addEventListener('click', () => {
     lastFailureText = null;
     renderFailurePanel();
 });
-commandConfirmCloseBtn.addEventListener('click', () => {
+function hideCommandConfirmOverlay() {
     commandConfirmOverlay.classList.remove('visible');
     commandConfirmOverlay.setAttribute('aria-hidden', 'true');
+    lastCommandConfirmRequest = null;
+}
+function showCommandConfirmOverlay(event) {
+    lastCommandConfirmRequest = event;
+    commandConfirmReason.textContent = event.reason;
+    commandConfirmRisk.textContent = `风险：${event.risk}`;
+    commandConfirmRisk.dataset.risk = event.risk;
+    commandConfirmCwd.textContent = `cwd: ${event.cwd}`;
+    commandConfirmText.textContent = event.command;
+    commandConfirmOverlay.classList.add('visible');
+    commandConfirmOverlay.setAttribute('aria-hidden', 'false');
+}
+async function submitCommandConfirm(decision) {
+    if (!lastCommandConfirmRequest)
+        return;
+    const { confirmId } = lastCommandConfirmRequest;
+    try {
+        const res = await fetch('/api/agent/command-confirm', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ confirmId, decision }),
+        });
+        if (!res.ok)
+            throw new Error('命令确认提交失败');
+        hideCommandConfirmOverlay();
+        if (decision === 'deny') {
+            showToast({ kind: 'info', title: '已拒绝', message: '命令未执行' });
+        }
+        else {
+            setAgentStatus('running');
+            if (decision === 'allow_whitelist')
+                void loadCommandWhitelist();
+            showToast({
+                kind: 'info',
+                title: decision === 'allow_whitelist' ? '已加入白名单' : '已允许',
+                message: '命令正在执行…',
+            });
+        }
+    }
+    catch (error) {
+        showToast({ kind: 'error', title: '确认失败', message: error.message });
+    }
+}
+commandConfirmDenyBtn.addEventListener('click', () => submitCommandConfirm('deny'));
+commandConfirmOnceBtn.addEventListener('click', () => submitCommandConfirm('allow_once'));
+commandConfirmWhitelistBtn.addEventListener('click', () => submitCommandConfirm('allow_whitelist'));
+commandConfirmOverlay.addEventListener('click', (e) => {
+    if (e.target === commandConfirmOverlay)
+        void submitCommandConfirm('deny');
 });
 newSessionBtn.addEventListener('click', createNewSession);
 sessionBadge.addEventListener('click', (e) => {
@@ -2093,6 +2154,80 @@ async function toggleToolEnabled(toolName, enabled) {
     renderToolCards();
 }
 refreshToolsBtnEl.addEventListener('click', loadTools);
+const whitelistList = document.querySelector('#whitelistList');
+const whitelistStatus = document.querySelector('#whitelistStatus');
+const refreshWhitelistBtn = document.querySelector('#refreshWhitelistBtn');
+const whitelistAddForm = document.querySelector('#whitelistAddForm');
+const whitelistPatternInput = document.querySelector('#whitelistPatternInput');
+const whitelistMatchTypeSelect = document.querySelector('#whitelistMatchTypeSelect');
+let whitelistCache = [];
+async function loadCommandWhitelist() {
+    try {
+        const res = await fetch('/api/command-whitelist');
+        const data = await res.json();
+        whitelistCache = data.entries ?? [];
+        whitelistStatus.textContent = `${whitelistCache.length} 条规则`;
+        renderWhitelistEntries();
+    }
+    catch {
+        whitelistStatus.textContent = '加载失败';
+        whitelistList.innerHTML = '<div class="version-empty">白名单加载失败</div>';
+    }
+}
+function renderWhitelistEntries() {
+    whitelistList.innerHTML = '';
+    if (whitelistCache.length === 0) {
+        whitelistList.innerHTML = '<div class="version-empty">暂无白名单，可在命令确认时添加</div>';
+        return;
+    }
+    whitelistCache.forEach((entry) => {
+        const card = document.createElement('div');
+        card.className = 'whitelist-item';
+        const matchLabel = entry.matchType === 'exact' ? '完全匹配' : entry.matchType === 'prefix' ? '前缀' : '命令名';
+        card.innerHTML = `
+      <div class="whitelist-item-header">
+        <code class="whitelist-pattern">${entry.pattern}</code>
+        <span class="whitelist-match-type">${matchLabel}</span>
+      </div>
+      <div class="whitelist-item-meta">${entry.label || entry.id}</div>
+      <button type="button" class="ghost-button whitelist-remove-btn" data-id="${entry.id}">删除</button>
+    `;
+        card.querySelector('.whitelist-remove-btn').addEventListener('click', () => removeWhitelistEntry(entry.id));
+        whitelistList.appendChild(card);
+    });
+}
+async function removeWhitelistEntry(id) {
+    const res = await fetch(`/api/command-whitelist/${encodeURIComponent(id)}`, { method: 'DELETE' });
+    if (!res.ok) {
+        showToast({ kind: 'error', title: '删除失败', message: '无法删除白名单项' });
+        return;
+    }
+    await loadCommandWhitelist();
+    showToast({ kind: 'info', title: '已删除', message: '白名单规则已移除' });
+}
+whitelistAddForm.addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const pattern = whitelistPatternInput.value.trim();
+    if (!pattern)
+        return;
+    const res = await fetch('/api/command-whitelist', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+            pattern,
+            matchType: whitelistMatchTypeSelect.value,
+            label: pattern,
+        }),
+    });
+    if (!res.ok) {
+        showToast({ kind: 'error', title: '添加失败', message: '无法添加白名单' });
+        return;
+    }
+    whitelistPatternInput.value = '';
+    await loadCommandWhitelist();
+    showToast({ kind: 'info', title: '已添加', message: `白名单：${pattern}` });
+});
+refreshWhitelistBtn.addEventListener('click', loadCommandWhitelist);
 loadLayoutState();
 applyLayoutWidths();
 initResizers();
@@ -2100,6 +2235,7 @@ loadExpandedFolders();
 loadWorkspace();
 loadVersions();
 loadTools();
+loadCommandWhitelist();
 // 添加模板生成按钮到新建菜单
 const newItemMenuElement = newItemMenu;
 if (newItemMenuElement) {

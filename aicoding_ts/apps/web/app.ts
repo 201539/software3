@@ -21,7 +21,13 @@ const failureDetail = document.querySelector<HTMLElement>('#failureDetail')!;
 const clearFailureBtn = document.querySelector<HTMLButtonElement>('#clearFailureBtn')!;
 const statusTimeline = document.querySelector<HTMLElement>('#statusTimeline')!;
 const commandConfirmOverlay = document.querySelector<HTMLElement>('#commandConfirmOverlay')!;
-const commandConfirmCloseBtn = document.querySelector<HTMLButtonElement>('#commandConfirmCloseBtn')!;
+const commandConfirmReason = document.querySelector<HTMLElement>('#commandConfirmReason')!;
+const commandConfirmRisk = document.querySelector<HTMLElement>('#commandConfirmRisk')!;
+const commandConfirmCwd = document.querySelector<HTMLElement>('#commandConfirmCwd')!;
+const commandConfirmText = document.querySelector<HTMLElement>('#commandConfirmText')!;
+const commandConfirmDenyBtn = document.querySelector<HTMLButtonElement>('#commandConfirmDenyBtn')!;
+const commandConfirmOnceBtn = document.querySelector<HTMLButtonElement>('#commandConfirmOnceBtn')!;
+const commandConfirmWhitelistBtn = document.querySelector<HTMLButtonElement>('#commandConfirmWhitelistBtn')!;
 const refreshBtn = document.querySelector<HTMLButtonElement>('#refreshBtn')!;
 const workspaceLayout = document.querySelector<HTMLElement>('#workspaceLayout')!;
 const newItemBtn = document.querySelector<HTMLButtonElement>('#newItemBtn')!;
@@ -32,7 +38,7 @@ const agentStatusBadge = document.querySelector<HTMLElement>('#agentStatusBadge'
 const newSessionBtn = document.querySelector<HTMLButtonElement>('#newSessionBtn')!;
 const workspacePathInput = document.querySelector<HTMLInputElement>('#workspacePathInput')!;
 const workspaceSuggestList = document.querySelector<HTMLUListElement>('#workspaceSuggestList')!;
-const loadWorkspaceBtn = document.querySelector<HTMLButtonElement>('#loadWorkspaceBtn')!;;
+const loadWorkspaceBtn = document.querySelector<HTMLButtonElement>('#loadWorkspaceBtn')!;
 
 type WorkspaceNode = {
   id: string;
@@ -110,6 +116,13 @@ let lastUserPrompt: string | null = null;
 let lastTaskPhase: UiTaskPhase = 'idle';
 let lastTaskPhaseUpdatedAt = 0;
 let lastConfirmRequest: { confirmId: string; question: string; options?: string[] } | null = null;
+let lastCommandConfirmRequest: {
+  confirmId: string;
+  command: string;
+  cwd: string;
+  risk: string;
+  reason: string;
+} | null = null;
 let showRawSummary = false;
 let lastFailureText: string | null = null;
 let statusHistory: Array<{ at: number; phase: UiTaskPhase; detail?: string }> = [];
@@ -1792,7 +1805,15 @@ async function streamChat(prompt: string) {
           | { type: 'error'; message: string }
           | { type: 'session'; sessionId: string }
           | { type: 'task_status'; taskId: string; status: string }
-          | { type: 'confirm_request'; confirmId: string; question: string; options?: string[] };
+          | { type: 'confirm_request'; confirmId: string; question: string; options?: string[] }
+          | {
+              type: 'command_confirm_request';
+              confirmId: string;
+              command: string;
+              cwd: string;
+              risk: string;
+              reason: string;
+            };
 
         if (event.type === 'chunk') {
           accumulatedChunks += event.chunk;
@@ -1851,6 +1872,11 @@ async function streamChat(prompt: string) {
           lastConfirmRequest = { confirmId: event.confirmId, question: event.question, options: event.options };
           renderWaitingUserPanel();
           renderConfirmCard(event);
+        } else if (event.type === 'command_confirm_request') {
+          setAgentStatus('waiting_confirm');
+          setTaskPhase('waiting_user', '等待命令确认');
+          hideCommandConfirmOverlay();
+          showCommandConfirmOverlay(event);
         }
       } catch {
         continue;
@@ -2150,9 +2176,61 @@ clearFailureBtn.addEventListener('click', () => {
   renderFailurePanel();
 });
 
-commandConfirmCloseBtn.addEventListener('click', () => {
+function hideCommandConfirmOverlay() {
   commandConfirmOverlay.classList.remove('visible');
   commandConfirmOverlay.setAttribute('aria-hidden', 'true');
+  lastCommandConfirmRequest = null;
+}
+
+function showCommandConfirmOverlay(event: {
+  confirmId: string;
+  command: string;
+  cwd: string;
+  risk: string;
+  reason: string;
+}) {
+  lastCommandConfirmRequest = event;
+  commandConfirmReason.textContent = event.reason;
+  commandConfirmRisk.textContent = `风险：${event.risk}`;
+  commandConfirmRisk.dataset.risk = event.risk;
+  commandConfirmCwd.textContent = `cwd: ${event.cwd}`;
+  commandConfirmText.textContent = event.command;
+  commandConfirmOverlay.classList.add('visible');
+  commandConfirmOverlay.setAttribute('aria-hidden', 'false');
+}
+
+async function submitCommandConfirm(decision: 'allow_once' | 'allow_whitelist' | 'deny') {
+  if (!lastCommandConfirmRequest) return;
+  const { confirmId } = lastCommandConfirmRequest;
+  try {
+    const res = await fetch('/api/agent/command-confirm', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ confirmId, decision }),
+    });
+    if (!res.ok) throw new Error('命令确认提交失败');
+    hideCommandConfirmOverlay();
+    if (decision === 'deny') {
+      showToast({ kind: 'info', title: '已拒绝', message: '命令未执行' });
+    } else {
+      setAgentStatus('running');
+      if (decision === 'allow_whitelist') void loadCommandWhitelist();
+      showToast({
+        kind: 'info',
+        title: decision === 'allow_whitelist' ? '已加入白名单' : '已允许',
+        message: '命令正在执行…',
+      });
+    }
+  } catch (error) {
+    showToast({ kind: 'error', title: '确认失败', message: (error as Error).message });
+  }
+}
+
+commandConfirmDenyBtn.addEventListener('click', () => submitCommandConfirm('deny'));
+commandConfirmOnceBtn.addEventListener('click', () => submitCommandConfirm('allow_once'));
+commandConfirmWhitelistBtn.addEventListener('click', () => submitCommandConfirm('allow_whitelist'));
+commandConfirmOverlay.addEventListener('click', (e) => {
+  if (e.target === commandConfirmOverlay) void submitCommandConfirm('deny');
 });
 
 newSessionBtn.addEventListener('click', createNewSession);
@@ -2256,6 +2334,95 @@ async function toggleToolEnabled(toolName: string, enabled: boolean) {
 
 refreshToolsBtnEl.addEventListener('click', loadTools);
 
+// ── 命令白名单 ──
+type WhitelistEntry = {
+  id: string;
+  pattern: string;
+  matchType: 'exact' | 'prefix' | 'command';
+  label?: string;
+  addedAt: string;
+};
+
+const whitelistList = document.querySelector<HTMLElement>('#whitelistList')!;
+const whitelistStatus = document.querySelector<HTMLElement>('#whitelistStatus')!;
+const refreshWhitelistBtn = document.querySelector<HTMLButtonElement>('#refreshWhitelistBtn')!;
+const whitelistAddForm = document.querySelector<HTMLFormElement>('#whitelistAddForm')!;
+const whitelistPatternInput = document.querySelector<HTMLInputElement>('#whitelistPatternInput')!;
+const whitelistMatchTypeSelect = document.querySelector<HTMLSelectElement>('#whitelistMatchTypeSelect')!;
+
+let whitelistCache: WhitelistEntry[] = [];
+
+async function loadCommandWhitelist() {
+  try {
+    const res = await fetch('/api/command-whitelist');
+    const data = await res.json() as { entries?: WhitelistEntry[] };
+    whitelistCache = data.entries ?? [];
+    whitelistStatus.textContent = `${whitelistCache.length} 条规则`;
+    renderWhitelistEntries();
+  } catch {
+    whitelistStatus.textContent = '加载失败';
+    whitelistList.innerHTML = '<div class="version-empty">白名单加载失败</div>';
+  }
+}
+
+function renderWhitelistEntries() {
+  whitelistList.innerHTML = '';
+  if (whitelistCache.length === 0) {
+    whitelistList.innerHTML = '<div class="version-empty">暂无白名单，可在命令确认时添加</div>';
+    return;
+  }
+  whitelistCache.forEach((entry) => {
+    const card = document.createElement('div');
+    card.className = 'whitelist-item';
+    const matchLabel =
+      entry.matchType === 'exact' ? '完全匹配' : entry.matchType === 'prefix' ? '前缀' : '命令名';
+    card.innerHTML = `
+      <div class="whitelist-item-header">
+        <code class="whitelist-pattern">${entry.pattern}</code>
+        <span class="whitelist-match-type">${matchLabel}</span>
+      </div>
+      <div class="whitelist-item-meta">${entry.label || entry.id}</div>
+      <button type="button" class="ghost-button whitelist-remove-btn" data-id="${entry.id}">删除</button>
+    `;
+    card.querySelector('.whitelist-remove-btn')!.addEventListener('click', () => removeWhitelistEntry(entry.id));
+    whitelistList.appendChild(card);
+  });
+}
+
+async function removeWhitelistEntry(id: string) {
+  const res = await fetch(`/api/command-whitelist/${encodeURIComponent(id)}`, { method: 'DELETE' });
+  if (!res.ok) {
+    showToast({ kind: 'error', title: '删除失败', message: '无法删除白名单项' });
+    return;
+  }
+  await loadCommandWhitelist();
+  showToast({ kind: 'info', title: '已删除', message: '白名单规则已移除' });
+}
+
+whitelistAddForm.addEventListener('submit', async (e) => {
+  e.preventDefault();
+  const pattern = whitelistPatternInput.value.trim();
+  if (!pattern) return;
+  const res = await fetch('/api/command-whitelist', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      pattern,
+      matchType: whitelistMatchTypeSelect.value,
+      label: pattern,
+    }),
+  });
+  if (!res.ok) {
+    showToast({ kind: 'error', title: '添加失败', message: '无法添加白名单' });
+    return;
+  }
+  whitelistPatternInput.value = '';
+  await loadCommandWhitelist();
+  showToast({ kind: 'info', title: '已添加', message: `白名单：${pattern}` });
+});
+
+refreshWhitelistBtn.addEventListener('click', loadCommandWhitelist);
+
 loadLayoutState();
 applyLayoutWidths();
 initResizers();
@@ -2263,6 +2430,7 @@ loadExpandedFolders();
 loadWorkspace();
 loadVersions();
 loadTools();
+loadCommandWhitelist();
 
 // 添加模板生成按钮到新建菜单
 const newItemMenuElement = newItemMenu;

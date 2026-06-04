@@ -1,11 +1,14 @@
 import type { LlmClient } from '../llm-client/index.ts';
 import type { ChatMessage, AssistantMessage, ToolResultMessage, ToolCall, AgentEvent } from '../shared/types.ts';
 import type { ExternalMcpTool } from '../mcp-client/index.ts';
+import type { CommandConfirmHook } from '../tool-gateway/run-command.ts';
 
 type ToolGateway = {
   readFile: (path: string) => Promise<unknown> | unknown;
   writeFile: (path: string, content: string) => unknown;
-  runCommand: (command: string) => unknown;
+  runCommand: (command: string, ctx?: { onCommandConfirm?: CommandConfirmHook }) => unknown;
+  readLints?: (path?: string) => unknown;
+  diffFile?: (path: string, snapshotId?: string) => unknown;
   listWorkspace: () => unknown;
   searchInWorkspace: (query: string, path?: string) => unknown;
   patchFile: (path: string, patch: string) => unknown;
@@ -89,11 +92,40 @@ const LOCAL_TOOL_DEFINITIONS = [
     type: 'function',
     function: {
       name: 'run_command',
-      description: '在工作区目录中执行命令',
+      description:
+        '在工作区目录执行命令。非白名单命令会暂停等待用户确认。优先用 read_lints 做静态检查；查看历史变更用 diff_file。',
       parameters: {
         type: 'object',
         properties: { command: { type: 'string' } },
         required: ['command'],
+        additionalProperties: false,
+      },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'read_lints',
+      description: '读取工作区或指定文件的 lint/TypeScript 问题（只读，无需确认）',
+      parameters: {
+        type: 'object',
+        properties: { path: { type: 'string' } },
+        additionalProperties: false,
+      },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'diff_file',
+      description: '对比文件与最近版本快照的差异（增删行）',
+      parameters: {
+        type: 'object',
+        properties: {
+          path: { type: 'string' },
+          snapshotId: { type: 'string' },
+        },
+        required: ['path'],
         additionalProperties: false,
       },
     },
@@ -197,13 +229,25 @@ function toolSummary(result: unknown): string {
   return String(result);
 }
 
+export type ExecutorHooks = {
+  onConfirm?: ConfirmHook;
+  onCommandConfirm?: CommandConfirmHook;
+};
+
 export function createExecutor(toolGateway: ToolGateway, externalMcpRegistry?: ExternalMcpRegistry) {
   const toolFns: Record<string, (args: Record<string, unknown>) => unknown> = {
     read_file: ({ path }) => toolGateway.readFile(path as string),
     write_file: ({ path, content }) => toolGateway.writeFile(path as string, content as string),
     patch_file: ({ path, patch }) => toolGateway.patchFile(path as string, patch as string),
     search_in_workspace: ({ query, path }) => toolGateway.searchInWorkspace(query as string, path as string | undefined),
-    run_command: ({ command }) => toolGateway.runCommand(command as string),
+    run_command: ({ command }) =>
+      toolGateway.runCommand(command as string),
+    read_lints: ({ path }) =>
+      toolGateway.readLints ? toolGateway.readLints(path as string | undefined) : { error: 'read_lints 不可用' },
+    diff_file: ({ path, snapshotId }) =>
+      toolGateway.diffFile
+        ? toolGateway.diffFile(path as string, snapshotId as string | undefined)
+        : { error: 'diff_file 不可用' },
     list_workspace: () => toolGateway.listWorkspace(),
     list_versions: () => toolGateway.listVersions(),
     create_snapshot: ({ name, description }) => toolGateway.createSnapshot(name as string | undefined, description as string | undefined),
@@ -233,8 +277,14 @@ export function createExecutor(toolGateway: ToolGateway, externalMcpRegistry?: E
       llmClient: LlmClient,
       messages: ChatMessage[],
       onEvent: (event: AgentEvent) => void,
-      onConfirm?: ConfirmHook,
+      hooks?: ConfirmHook | ExecutorHooks,
     ): Promise<LoopResult> {
+      const onConfirm =
+        typeof hooks === 'function' ? hooks : hooks?.onConfirm;
+      const onCommandConfirm =
+        typeof hooks === 'object' && hooks && 'onCommandConfirm' in hooks
+          ? hooks.onCommandConfirm
+          : undefined;
       const workingMessages: ChatMessage[] = [...messages];
       const loopMessages: ChatMessage[] = [];
       const toolsUsed: string[] = [];
@@ -296,7 +346,13 @@ export function createExecutor(toolGateway: ToolGateway, externalMcpRegistry?: E
             const fn = toolFns[toolName];
             if (fn) {
               try {
-                toolResult = await fn(args);
+                if (toolName === 'run_command' && onCommandConfirm) {
+                  toolResult = await toolGateway.runCommand(args.command as string, {
+                    onCommandConfirm,
+                  });
+                } else {
+                  toolResult = await fn(args);
+                }
               } catch (err) {
                 toolResult = { error: String(err) };
               }

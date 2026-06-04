@@ -106,12 +106,24 @@ export type PlanEvent = {
   steps: string[];
 };
 
+export type CommandRisk = 'low' | 'medium' | 'high';
+
 export type ConfirmRequestEvent = {
   type: 'confirm_request';
   taskId: string;
   confirmId: string;
   question: string;
   options?: string[];
+};
+
+export type CommandConfirmRequestEvent = {
+  type: 'command_confirm_request';
+  taskId: string;
+  confirmId: string;
+  command: string;
+  cwd: string;
+  risk: CommandRisk;
+  reason: string;
 };
 
 export type ConfirmResolvedEvent = {
@@ -140,6 +152,7 @@ export type AgentEvent =
   | ErrorEvent
   | PlanEvent
   | ConfirmRequestEvent
+  | CommandConfirmRequestEvent
   | ConfirmResolvedEvent
   | TaskStatusEvent
   | SessionEvent;
@@ -154,5 +167,18 @@ export type PendingConfirm = {
   options?: string[];
   createdAt: number;
   resolve: (answer: string) => void;
+  reject: (reason: Error) => void;
+};
+
+export type PendingCommandConfirm = {
+  confirmId: string;
+  taskId: string;
+  sessionId: string;
+  command: string;
+  cwd: string;
+  risk: CommandRisk;
+  reason: string;
+  createdAt: number;
+  resolve: (decision: 'allow_once' | 'allow_whitelist' | 'deny') => void;
   reject: (reason: Error) => void;
 };

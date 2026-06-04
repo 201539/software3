@@ -6,10 +6,20 @@
 
 ## 待做
 
+- [ ] **工具链后续**：`patch_file` fuzzy match、`diff_file` 与 UI 联动展示、工具调用日志 API
+
 - [ ] **上下文管理优化**：将当前的"截断"改为真正的"压缩"
   - 现状：`truncateMessages(messages, 40)` 只是把旧消息从头切掉，信息直接丢失
   - 目标：新任务组装 `llmMessages` 时只传任务摘要（`taskSummaries`），不传原始历史消息；原始消息仅在任务内部 ReAct loop 中使用，任务结束后不再累积传递
   - 相关文件：`packages/agent-core/index.ts` `truncateMessages(session.messages)` 调用
+
+## 已完成（迭代三 工具链 2026-06-04）
+
+- [x] **工具链：run_command 安全确认 + 白名单**（2026-06-04）
+  - `command-safety.ts` / `command-whitelist-store.ts` / `run-command.ts`
+  - SSE `command_confirm_request` + `POST /api/agent/command-confirm`
+  - 新增工具 `read_lints`、`diff_file`
+  - Web：命令确认弹窗 + 白名单 CRUD 面板
 
 ## 已完成（新周期 2026-04-27）
 
