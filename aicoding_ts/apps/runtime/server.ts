@@ -554,6 +554,15 @@ export function startRuntimeServer() {
       return;
     }
 
+    // ── GET /api/tools/:name/logs ──
+    if (url.pathname.startsWith('/api/tools/') && url.pathname.endsWith('/logs') && req.method === 'GET') {
+      const toolName = decodeURIComponent(url.pathname.replace('/api/tools/', '').replace('/logs', ''));
+      const limit = Number(url.searchParams.get('limit') || 30);
+      const logs = toolGateway.registry.getToolLogs(toolName, limit);
+      sendJson(res, 200, { tool: toolName, logs });
+      return;
+    }
+
     // ── POST /api/tools/:name/test ──
     if (url.pathname.startsWith('/api/tools/') && url.pathname.endsWith('/test') && req.method === 'POST') {
       const toolName = decodeURIComponent(url.pathname.replace('/api/tools/', '').replace('/test', ''));

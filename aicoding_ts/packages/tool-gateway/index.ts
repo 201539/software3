@@ -12,6 +12,7 @@ import {
 } from './run-command.ts';
 import { diffFileAgainstSnapshot } from './diff-file.ts';
 import { readLints } from './read-lints.ts';
+import { createToolCallLogStore } from './tool-call-log.ts';
 
 export type { CommandConfirmHook, CommandConfirmDecision, CommandConfirmRequest } from './run-command.ts';
 export type { WhitelistEntry, CommandRisk } from './command-safety.ts';
@@ -84,7 +85,8 @@ function buildToolDefinitions(
     },
     {
       name: 'patch_file',
-      description: '根据局部补丁修改工作区中的文件',
+      description:
+        '局部替换文件。支持 unified diff、before\\n---\\nafter、before => after、@@ line N 行号锚点。失败时先 read_file。',
       inputSchema: buildInputSchema(
         {
           path: { type: 'string', minLength: 1 },
@@ -361,6 +363,7 @@ export function createToolGateway(workspaceManager: WorkspaceManager) {
   };
 
   const toolRecords = new Map<string, ToolRecord>();
+  const callLog = createToolCallLogStore();
 
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   function wrapWithStats(name: string, description: string, fn: (...args: any[]) => unknown | Promise<unknown>): (...args: any[]) => Promise<unknown> {
@@ -382,20 +385,40 @@ export function createToolGateway(workspaceManager: WorkspaceManager) {
       const start = Date.now();
       try {
         const result = await fn(...args);
-        record.callCount++;
-        record.successCount++;
         const duration = Date.now() - start;
+        record.callCount++;
+        callLog.append(name, args, result, duration);
+        const ok =
+          result &&
+          typeof result === 'object' &&
+          !(result as Record<string, unknown>).error &&
+          (result as Record<string, unknown>).ok !== false &&
+          (result as Record<string, unknown>).status !== 'failed' &&
+          (result as Record<string, unknown>).status !== 'denied' &&
+          (result as Record<string, unknown>).action !== 'patch_failed';
+        if (ok) record.successCount++;
         record.avgDurationMs = record.avgDurationMs === 0 ? duration : Math.round(record.avgDurationMs * 0.9 + duration * 0.1);
         record.lastCalledAt = new Date().toISOString();
         return result;
       } catch (err) {
-        record.callCount++;
         const duration = Date.now() - start;
+        record.callCount++;
+        callLog.append(name, args, null, duration, err);
         record.avgDurationMs = record.avgDurationMs === 0 ? duration : Math.round(record.avgDurationMs * 0.9 + duration * 0.1);
         record.lastCalledAt = new Date().toISOString();
         throw err;
       }
     };
+  }
+
+  function registryIsToolEnabled(name: string): boolean {
+    const record = toolRecords.get(name);
+    if (!record) return true;
+    return record.enabled;
+  }
+
+  function registryGetToolLogs(name: string, limit = 30) {
+    return callLog.getLogs(name, limit);
   }
 
   function registryGetAllToolInfos(): ToolInfo[] {
@@ -461,10 +484,13 @@ export function createToolGateway(workspaceManager: WorkspaceManager) {
       diffFileFn(path, snapshotId),
     ),
     commandWhitelist: whitelistStore,
+    isToolEnabled: registryIsToolEnabled,
     registry: {
       getAllToolInfos: registryGetAllToolInfos,
       setToolEnabled: registrySetToolEnabled,
       testTool: registryTestTool,
+      getToolLogs: registryGetToolLogs,
+      isToolEnabled: registryIsToolEnabled,
     },
     mcp: mcpServer,
   };

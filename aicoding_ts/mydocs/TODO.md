@@ -6,7 +6,7 @@
 
 ## 待做
 
-- [ ] **工具链后续**：`patch_file` fuzzy match、`diff_file` 与 UI 联动展示、工具调用日志 API
+- [ ] **工具链后续（可选）**：MCP 配置并入工具管理 Tab、外部工具禁用、工具日志持久化到磁盘
 
 - [ ] **上下文管理优化**：将当前的"截断"改为真正的"压缩"
   - 现状：`truncateMessages(messages, 40)` 只是把旧消息从头切掉，信息直接丢失
@@ -14,6 +14,12 @@
   - 相关文件：`packages/agent-core/index.ts` `truncateMessages(session.messages)` 调用
 
 ## 已完成（迭代三 工具链 2026-06-04）
+
+- [x] **工具链二期：patch/日志/降级/UI**（2026-06-04）
+  - `patch-matcher.ts` fuzzy 匹配 + `@@ line N` 行号锚点
+  - `tool-call-log.ts` + `GET /api/tools/:name/logs`
+  - `tool-fallback.ts` 失败降级提示；executor 过滤已禁用工具
+  - `tool-definitions.ts` 工具描述优化；UI 测试/日志、diff_file 对话内格式化
 
 - [x] **工具链：run_command 安全确认 + 白名单**（2026-06-04）
   - `command-safety.ts` / `command-whitelist-store.ts` / `run-command.ts`

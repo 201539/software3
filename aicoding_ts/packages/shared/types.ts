@@ -76,6 +76,17 @@ export type ToolInfo = {
   lastCalledAt: string | null;
 };
 
+export type ToolCallLogEntry = {
+  id: string;
+  toolName: string;
+  argsPreview: string;
+  ok: boolean;
+  durationMs: number;
+  at: string;
+  resultPreview: string;
+  error?: string;
+};
+
 // ── SSE 事件类型（向后兼容原有 chunk/tool/result/error，新增以下类型）──
 
 export type ChunkEvent = {

@@ -763,10 +763,41 @@ function renderMarkdown(text: string): string {
 const TOOL_COLORS: Record<string, string> = {
   write_file: 'var(--accent-2)',
   read_file: 'var(--muted)',
+  patch_file: '#a78bfa',
+  search_in_workspace: '#94a3b8',
   run_command: '#f59e0b',
+  read_lints: '#34d399',
+  diff_file: '#38bdf8',
   ask_user: '#facc15',
   list_workspace: 'var(--muted)',
 };
+
+function formatToolDetailForChat(toolName: string, rawDetail: string): string {
+  if (toolName !== 'diff_file') return rawDetail;
+  try {
+    const data = JSON.parse(rawDetail) as {
+      path?: string;
+      snapshotName?: string;
+      stats?: { added: number; removed: number; unchanged: number };
+      hunks?: Array<{ type: string; line: string; oldLineNo?: number; newLineNo?: number }>;
+    };
+    const lines: string[] = [
+      `文件：${data.path ?? '?'}`,
+      `对比快照：${data.snapshotName ?? '最新'}`,
+      `变更：+${data.stats?.added ?? 0} / -${data.stats?.removed ?? 0}`,
+      '',
+    ];
+    for (const h of (data.hunks ?? []).slice(0, 80)) {
+      const prefix = h.type === 'add' ? '+' : h.type === 'remove' ? '-' : ' ';
+      const no = h.newLineNo ?? h.oldLineNo ?? '';
+      lines.push(`${prefix} ${String(no).padStart(4)} | ${h.line}`);
+    }
+    if ((data.hunks?.length ?? 0) > 80) lines.push('…（仅显示前 80 行）');
+    return lines.join('\n');
+  } catch {
+    return rawDetail;
+  }
+}
 
 function appendMessage(role: string, text: string) {
   const div = document.createElement('div');
@@ -1819,11 +1850,15 @@ async function streamChat(prompt: string) {
           accumulatedChunks += event.chunk;
           updateAssistant(accumulatedChunks);
         } else if (event.type === 'tool') {
-          appendToolDetail(event.tool, `${event.summary || '工具调用结果'}\n\n${event.detail || ''}`);
+          const detailBody = formatToolDetailForChat(
+            event.tool,
+            event.detail || '',
+          );
+          appendToolDetail(event.tool, `${event.summary || '工具调用结果'}\n\n${detailBody}`);
           if (event.tool === 'run_command') {
             lastRunCommandDetail = `${event.summary || '命令执行'}\n\n${event.detail || ''}`.trim();
           }
-          if (event.tool === 'write_file') {
+          if (event.tool === 'write_file' || event.tool === 'patch_file') {
             sawWriteFileSuccess = true;
             scheduleWorkspaceRefresh(300);
           }
@@ -2273,6 +2308,85 @@ const refreshToolsBtnEl = document.querySelector<HTMLButtonElement>('#refreshToo
 
 let toolCache: ToolInfo[] = [];
 
+const TOOL_TEST_PRESETS: Record<string, string> = {
+  read_file: '{\n  "path": "package.json"\n}',
+  write_file: '{\n  "path": "test.txt",\n  "content": "hello"\n}',
+  patch_file: '{\n  "path": "test.txt",\n  "patch": "hello\\n---\\nworld"\n}',
+  search_in_workspace: '{\n  "query": "function"\n}',
+  run_command: '{\n  "command": "npm test"\n}',
+  read_lints: '{}',
+  diff_file: '{\n  "path": "package.json"\n}',
+  list_workspace: '{}',
+  list_versions: '{}',
+};
+
+async function showToolTestDialog(toolName: string) {
+  const preset = TOOL_TEST_PRESETS[toolName] ?? '{}';
+  const dialog = document.createElement('div');
+  dialog.className = 'tree-dialog-overlay visible';
+  dialog.setAttribute('aria-hidden', 'false');
+  dialog.innerHTML = `
+    <div class="tree-dialog tool-test-dialog">
+      <h3>测试工具：${toolName}</h3>
+      <label class="tool-test-label">参数 JSON</label>
+      <textarea class="tool-test-args" rows="8">${preset}</textarea>
+      <pre class="tool-test-result"></pre>
+      <div class="tree-dialog-actions">
+        <button type="button" data-role="cancel" class="ghost-button">关闭</button>
+        <button type="button" data-role="run" class="confirm-submit-btn">运行</button>
+      </div>
+    </div>
+  `;
+  document.body.appendChild(dialog);
+  const close = () => dialog.remove();
+  dialog.querySelector('[data-role="cancel"]')!.addEventListener('click', close);
+  dialog.addEventListener('click', (e) => { if (e.target === dialog) close(); });
+  dialog.querySelector('[data-role="run"]')!.addEventListener('click', async () => {
+    const textarea = dialog.querySelector<HTMLTextAreaElement>('.tool-test-args')!;
+    const resultEl = dialog.querySelector<HTMLElement>('.tool-test-result')!;
+    try {
+      const args = JSON.parse(textarea.value) as Record<string, unknown>;
+      resultEl.textContent = '运行中…';
+      const res = await fetch(`/api/tools/${encodeURIComponent(toolName)}/test`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(args),
+      });
+      const data = await res.json();
+      resultEl.textContent = JSON.stringify(data, null, 2);
+      void loadTools();
+    } catch (err) {
+      resultEl.textContent = `错误：${(err as Error).message}`;
+    }
+  });
+}
+
+async function showToolLogsDialog(toolName: string) {
+  const res = await fetch(`/api/tools/${encodeURIComponent(toolName)}/logs?limit=20`);
+  const data = await res.json() as { logs?: Array<{ at: string; ok: boolean; durationMs: number; argsPreview: string; resultPreview: string }> };
+  const logs = data.logs ?? [];
+  const dialog = document.createElement('div');
+  dialog.className = 'tree-dialog-overlay visible';
+  dialog.innerHTML = `
+    <div class="tree-dialog tool-logs-dialog">
+      <h3>${toolName} 调用日志</h3>
+      <div class="tool-logs-list">${logs.length === 0 ? '<p class="version-empty">暂无记录</p>' : logs.map((l) => `
+        <div class="tool-log-entry ${l.ok ? 'ok' : 'fail'}">
+          <div class="tool-log-meta">${l.at} · ${l.durationMs}ms · ${l.ok ? '成功' : '失败'}</div>
+          <div class="tool-log-args">${l.argsPreview}</div>
+          <div class="tool-log-result">${l.resultPreview}</div>
+        </div>
+      `).join('')}</div>
+      <div class="tree-dialog-actions">
+        <button type="button" class="ghost-button">关闭</button>
+      </div>
+    </div>
+  `;
+  document.body.appendChild(dialog);
+  dialog.querySelector('button')!.addEventListener('click', () => dialog.remove());
+  dialog.addEventListener('click', (e) => { if (e.target === dialog) dialog.remove(); });
+}
+
 async function loadTools() {
   try {
     const res = await fetch('/api/tools');
@@ -2311,10 +2425,16 @@ function renderToolCards() {
         <span>${tool.enabled ? '已启用' : '已禁用'}</span>
         <div class="tool-toggle-switch${tool.enabled ? ' on' : ''}"></div>
       </div>
+      <div class="tool-item-actions">
+        ${tool.source === 'local' ? `<button type="button" class="ghost-button tool-test-btn" data-tool="${tool.name}">测试</button>` : ''}
+        <button type="button" class="ghost-button tool-logs-btn" data-tool="${tool.name}">日志</button>
+      </div>
     `;
 
     const toggle = card.querySelector<HTMLElement>('.tool-toggle')!;
     toggle.addEventListener('click', () => toggleToolEnabled(tool.name, !tool.enabled));
+    card.querySelector('.tool-test-btn')?.addEventListener('click', () => showToolTestDialog(tool.name));
+    card.querySelector('.tool-logs-btn')?.addEventListener('click', () => showToolLogsDialog(tool.name));
 
     toolList.appendChild(card);
   });

@@ -3,6 +3,16 @@
 ## [Unreleased]
 
 ### Added
+- `packages/tool-gateway/patch-matcher.ts`：补丁 fuzzy 匹配与 `@@ line N` 行号锚点
+- `packages/tool-gateway/tool-call-log.ts`、`tool-fallback.ts`
+- `packages/agent-core/tool-definitions.ts`：带示例的详细工具描述
+- `GET /api/tools/:name/logs`；工具管理 UI：测试对话框、调用日志、diff_file 格式化展示
+
+### Changed
+- `patch_file`：增强容错与失败提示；禁用工具不再暴露给 LLM
+- 工具失败时返回 `fallback` 建议（`enrichToolResult`）
+
+### Added
 - `packages/tool-gateway/command-safety.ts`：命令风险分级、危险模式拦截、白名单匹配
 - `packages/tool-gateway/command-whitelist-store.ts`：项目级 `command-whitelist.json` 持久化与默认规则
 - `packages/tool-gateway/run-command.ts`：安全执行、超时控制、命令确认 Hook
