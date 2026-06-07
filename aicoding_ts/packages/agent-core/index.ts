@@ -23,10 +23,12 @@ type Context = {
   selectedFile: string | null;
   selectedFileContent: unknown;
   workspaceSummary: string;
+  projectMemorySummary?: string;
   contextBudget: {
     includedFiles: string[];
     maxChars: number;
     maxFiles: number;
+    strategy?: string;
   };
 };
 
@@ -51,7 +53,7 @@ type SessionStore = {
 };
 
 type ContextBuilder = {
-  buildForPrompt: (prompt: string, selectedFile?: string | null) => Promise<Context>;
+  buildForPrompt: (prompt: string, selectedFile?: string | null, options?: { projectMemory?: string }) => Promise<Context>;
 };
 
 function truncateMessages(messages: ChatMessage[], maxCount = 40): ChatMessage[] {
@@ -79,8 +81,9 @@ function buildSystemPrompt(
     context.workspaceSummary || '（工作区为空）',
   ];
 
-  if (projectMemory.trim()) {
-    parts.push('', '## 项目说明', projectMemory.trim());
+  const retrievedMemory = context.projectMemorySummary?.trim() || projectMemory.trim();
+  if (retrievedMemory) {
+    parts.push('', '## 项目记忆（按当前任务检索）', retrievedMemory);
   }
 
   const recentSummaries = taskSummaries.slice(-5);
@@ -126,7 +129,7 @@ export function createAgentCore(
     onEvent({ type: 'task_status', taskId, status: 'planning' });
 
     const projectMemory = await sessionStore.readProjectMemory();
-    const context = await contextBuilder.buildForPrompt(userPrompt, selectedFile);
+    const context = await contextBuilder.buildForPrompt(userPrompt, selectedFile, { projectMemory });
 
     const systemMsg: SystemMessage = {
       role: 'system',
