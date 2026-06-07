@@ -7,12 +7,35 @@ export type { Session, TaskSummary, ChatMessage };
 
 export function createSessionStore(options: { projectId?: string } = {}) {
   const projectId = options.projectId ?? DEFAULT_PROJECT_ID;
+  const projectDir = join(process.cwd(), 'workspaces', projectId);
   const sessionsDir = join(process.cwd(), 'workspaces', projectId, 'sessions');
   const currentFile = join(sessionsDir, 'current.json');
-  const memoryFile = join(process.cwd(), 'workspaces', projectId, 'project-memory.md');
+  const memoryFile = join(projectDir, 'project-memory.md');
+
+  const defaultProjectMemory = `# 项目记忆
+
+## 编码规范
+- 使用 TypeScript 严格模式
+
+## 技术决策
+- 待记录
+
+## 常见问题
+- 待记录
+
+## 用户偏好
+- 待记录
+
+## Agent 任务经验
+- 待记录
+`;
 
   async function ensureDir() {
     await mkdir(sessionsDir, { recursive: true });
+  }
+
+  async function ensureProjectDir() {
+    await mkdir(projectDir, { recursive: true });
   }
 
   function sessionPath(sessionId: string) {
@@ -100,6 +123,48 @@ export function createSessionStore(options: { projectId?: string } = {}) {
     } catch {
       return '';
     }
+  }
+
+  async function getProjectMemory(): Promise<{ content: string; path: string; exists: boolean; template: string }> {
+    try {
+      return {
+        content: await readFile(memoryFile, 'utf8'),
+        path: memoryFile,
+        exists: true,
+        template: defaultProjectMemory,
+      };
+    } catch {
+      return {
+        content: '',
+        path: memoryFile,
+        exists: false,
+        template: defaultProjectMemory,
+      };
+    }
+  }
+
+  async function writeProjectMemory(content: string): Promise<{ content: string; path: string; updatedAt: string }> {
+    await ensureProjectDir();
+    const normalized = content.replace(/\r\n/g, '\n').trimEnd();
+    const updatedAt = new Date().toISOString();
+    await writeFile(memoryFile, `${normalized}\n`, 'utf8');
+    return { content: `${normalized}\n`, path: memoryFile, updatedAt };
+  }
+
+  async function appendProjectMemory(entry: string, section = 'Agent 任务经验'): Promise<{ content: string; path: string; updatedAt: string }> {
+    const trimmed = entry.trim();
+    if (!trimmed) throw new Error('Project memory entry is empty');
+
+    const current = (await readProjectMemory()).trimEnd() || defaultProjectMemory.trimEnd();
+    const heading = `## ${section}`;
+    const datedEntry = `- ${new Date().toISOString().slice(0, 10)}: ${trimmed.replace(/\s+/g, ' ')}`;
+    const escaped = section.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    const sectionPattern = new RegExp(`(^##\\s+${escaped}\\s*$)`, 'm');
+    const next = sectionPattern.test(current)
+      ? current.replace(sectionPattern, `$1\n${datedEntry}`)
+      : `${current}\n\n${heading}\n${datedEntry}`;
+
+    return writeProjectMemory(next);
   }
 
   async function listSessions(): Promise<Array<{
@@ -211,6 +276,9 @@ export function createSessionStore(options: { projectId?: string } = {}) {
     appendMessages,
     appendTaskSummary,
     readProjectMemory,
+    getProjectMemory,
+    writeProjectMemory,
+    appendProjectMemory,
     listSessions,
     switchSession,
     deleteSession,

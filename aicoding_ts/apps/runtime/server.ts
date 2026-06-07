@@ -14,6 +14,8 @@ import { createExternalMcpRegistry, type ExternalMcpServerConfig } from '../../p
 type RequestContext = {
   path?: string;
   content?: string;
+  entry?: string;
+  section?: string;
   nextName?: string;
   command?: string;
   prompt?: string;
@@ -363,6 +365,33 @@ export function startRuntimeServer() {
     }
 
     // ── POST /api/workspace/load（切换工作区目录）──
+    if (url.pathname === '/api/project-memory' && req.method === 'GET') {
+      sendJson(res, 200, await sessionStore.getProjectMemory());
+      return;
+    }
+
+    if (url.pathname === '/api/project-memory' && req.method === 'PUT') {
+      const { content } = await parseBody<RequestContext>(req);
+      const updated = await sessionStore.writeProjectMemory(content ?? '');
+      sendJson(res, 200, { ok: true, ...updated });
+      return;
+    }
+
+    if (url.pathname === '/api/project-memory/append' && req.method === 'POST') {
+      const { entry, section } = await parseBody<RequestContext>(req);
+      if (!entry?.trim()) {
+        sendJson(res, 400, { error: 'entry is required' });
+        return;
+      }
+      try {
+        const updated = await sessionStore.appendProjectMemory(entry, section);
+        sendJson(res, 200, { ok: true, ...updated });
+      } catch (err) {
+        sendJson(res, 400, { error: err instanceof Error ? err.message : String(err) });
+      }
+      return;
+    }
+
     if (url.pathname === '/api/workspace/load' && req.method === 'POST') {
       const { path: dirPath } = await parseBody<{ path?: string }>(req);
       if (!dirPath) {

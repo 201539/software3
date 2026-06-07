@@ -63,6 +63,18 @@ function truncateMessages(messages: ChatMessage[], maxCount = 40): ChatMessage[]
   return firstUser > 0 ? tail.slice(firstUser) : tail;
 }
 
+function buildProjectMemorySuggestion(prompt: string, toolsUsed: string[], filesModified: string[]): string {
+  const facts: string[] = [];
+  if (filesModified.length > 0) {
+    facts.push(`本次任务修改了 ${filesModified.slice(0, 5).join('、')}`);
+  }
+  if (toolsUsed.length > 0) {
+    facts.push(`使用工具链：${[...new Set(toolsUsed)].slice(0, 5).join('、')}`);
+  }
+  if (facts.length === 0) return '';
+  return `项目知识建议：如果这是可复用经验，可保存到“Agent 任务经验”：${prompt}；${facts.join('；')}。`;
+}
+
 function buildSystemPrompt(
   context: Context,
   projectMemory: string,
@@ -160,6 +172,11 @@ export function createAgentCore(
       execution: { content: loopResult.finalContent },
       review,
     });
+    const memorySuggestion = buildProjectMemorySuggestion(
+      userPrompt,
+      loopResult.toolsUsed,
+      loopResult.filesModified,
+    );
 
     const taskSummary: TaskSummary = {
       taskId,
@@ -167,7 +184,7 @@ export function createAgentCore(
       startedAt,
       completedAt: new Date().toISOString(),
       status: 'completed',
-      summary: summaryText,
+      summary: memorySuggestion ? `${summaryText}\n\n${memorySuggestion}` : summaryText,
       toolsUsed: loopResult.toolsUsed,
       filesModified: loopResult.filesModified,
     };

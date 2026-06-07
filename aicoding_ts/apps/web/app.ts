@@ -33,6 +33,11 @@ const newSessionBtn = document.querySelector<HTMLButtonElement>('#newSessionBtn'
 const workspacePathInput = document.querySelector<HTMLInputElement>('#workspacePathInput')!;
 const workspaceSuggestList = document.querySelector<HTMLUListElement>('#workspaceSuggestList')!;
 const loadWorkspaceBtn = document.querySelector<HTMLButtonElement>('#loadWorkspaceBtn')!;;
+const projectMemoryEditor = document.querySelector<HTMLTextAreaElement>('#projectMemoryEditor')!;
+const projectMemoryStatus = document.querySelector<HTMLElement>('#projectMemoryStatus')!;
+const saveProjectMemoryBtn = document.querySelector<HTMLButtonElement>('#saveProjectMemoryBtn')!;
+const reloadProjectMemoryBtn = document.querySelector<HTMLButtonElement>('#reloadProjectMemoryBtn')!;
+const appendLastTaskMemoryBtn = document.querySelector<HTMLButtonElement>('#appendLastTaskMemoryBtn')!;
 
 type WorkspaceNode = {
   id: string;
@@ -51,10 +56,14 @@ type ToolEvent = {
 };
 
 type PreviewResult = {
+  taskId?: string;
+  prompt?: string;
   output?: string;
   toolResults?: Array<{ name: string; result?: { ok?: boolean; file?: unknown } }>;
   data?: { toolResults?: Array<{ name: string; result?: { ok?: boolean; file?: unknown } }> };
   summary?: string;
+  toolsUsed?: string[];
+  filesModified?: string[];
   changedFiles?: string[];
   commands?: Array<{ command: string; exitCode?: number; cwd?: string }>;
 };
@@ -115,6 +124,7 @@ let lastFailureText: string | null = null;
 let statusHistory: Array<{ at: number; phase: UiTaskPhase; detail?: string }> = [];
 let lastRunCommandDetail: string | null = null;
 let shouldScrollTreeToActive = false;
+let lastProjectMemoryEntry: string | null = null;
 
 const layoutState = {
   chat: 34,
@@ -462,6 +472,22 @@ function normalizeToolResults(result: PreviewResult | null): Array<{ name: strin
   }));
 }
 
+function buildProjectMemoryEntry(result: PreviewResult | null, changedFiles: string[]): string | null {
+  if (!result) return null;
+  const prompt = result.prompt?.trim() || lastUserPrompt?.trim();
+  const summaryText = result.summary?.trim() || result.output?.trim();
+  if (!prompt && !summaryText && changedFiles.length === 0) return null;
+
+  const parts = [
+    prompt ? `任务：${prompt}` : '',
+    summaryText ? `经验：${summaryText.replace(/\s+/g, ' ').slice(0, 260)}` : '',
+    changedFiles.length > 0 ? `相关文件：${changedFiles.slice(0, 5).join('、')}` : '',
+    result.toolsUsed?.length ? `工具：${[...new Set(result.toolsUsed)].slice(0, 5).join('、')}` : '',
+  ].filter(Boolean);
+
+  return parts.join('；');
+}
+
 function renderStructuredSummary(result: PreviewResult | null) {
   const toolResults = normalizeToolResults(result);
 
@@ -531,6 +557,8 @@ function renderStructuredSummary(result: PreviewResult | null) {
 
   if (!result) {
     mkRow('状态', mkValue('暂无摘要（等待任务运行）。'));
+    lastProjectMemoryEntry = null;
+    appendLastTaskMemoryBtn.disabled = true;
     return;
   }
 
@@ -561,6 +589,9 @@ function renderStructuredSummary(result: PreviewResult | null) {
       .join(' / ');
     mkRow('工具调用', mkValue(brief));
   }
+
+  lastProjectMemoryEntry = buildProjectMemoryEntry(result, [...changedFiles]);
+  appendLastTaskMemoryBtn.disabled = !lastProjectMemoryEntry;
 }
 
 // ── 工作区历史记录 ──
@@ -2256,6 +2287,67 @@ async function toggleToolEnabled(toolName: string, enabled: boolean) {
 
 refreshToolsBtnEl.addEventListener('click', loadTools);
 
+async function loadProjectMemory() {
+  try {
+    projectMemoryStatus.textContent = '加载中…';
+    const res = await fetch('/api/project-memory');
+    if (!res.ok) throw new Error('项目知识加载失败');
+    const data = await res.json() as { content?: string; template?: string; exists?: boolean };
+    projectMemoryEditor.value = data.content || data.template || '# 项目记忆\n';
+    projectMemoryStatus.textContent = data.exists ? '已加载' : '使用默认模板';
+  } catch (error) {
+    projectMemoryStatus.textContent = '加载失败';
+    showToast({ kind: 'error', title: '项目知识加载失败', message: (error as Error).message });
+  }
+}
+
+async function saveProjectMemory() {
+  try {
+    projectMemoryStatus.textContent = '保存中…';
+    const res = await fetch('/api/project-memory', {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ content: projectMemoryEditor.value }),
+    });
+    if (!res.ok) throw new Error('项目知识保存失败');
+    const data = await res.json() as { content?: string; updatedAt?: string };
+    if (typeof data.content === 'string') projectMemoryEditor.value = data.content;
+    projectMemoryStatus.textContent = data.updatedAt ? `已保存 ${new Date(data.updatedAt).toLocaleTimeString('zh-CN', { hour12: false })}` : '已保存';
+    showToast({ kind: 'info', title: '项目知识已保存', message: '后续会话会按任务自动检索这份知识。' });
+  } catch (error) {
+    projectMemoryStatus.textContent = '保存失败';
+    showToast({ kind: 'error', title: '项目知识保存失败', message: (error as Error).message });
+  }
+}
+
+async function appendLastTaskMemory() {
+  if (!lastProjectMemoryEntry) {
+    showToast({ kind: 'warn', title: '暂无可保存经验', message: '完成一次任务后再保存到项目知识。' });
+    return;
+  }
+  try {
+    appendLastTaskMemoryBtn.disabled = true;
+    const res = await fetch('/api/project-memory/append', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ section: 'Agent 任务经验', entry: lastProjectMemoryEntry }),
+    });
+    if (!res.ok) throw new Error('任务经验保存失败');
+    const data = await res.json() as { content?: string; updatedAt?: string };
+    if (typeof data.content === 'string') projectMemoryEditor.value = data.content;
+    projectMemoryStatus.textContent = data.updatedAt ? `已追加 ${new Date(data.updatedAt).toLocaleTimeString('zh-CN', { hour12: false })}` : '已追加';
+    showToast({ kind: 'info', title: '任务经验已保存', message: '这条经验将参与后续会话的上下文检索。' });
+  } catch (error) {
+    appendLastTaskMemoryBtn.disabled = false;
+    showToast({ kind: 'error', title: '保存任务经验失败', message: (error as Error).message });
+  }
+}
+
+saveProjectMemoryBtn.addEventListener('click', saveProjectMemory);
+reloadProjectMemoryBtn.addEventListener('click', loadProjectMemory);
+appendLastTaskMemoryBtn.addEventListener('click', appendLastTaskMemory);
+appendLastTaskMemoryBtn.disabled = true;
+
 loadLayoutState();
 applyLayoutWidths();
 initResizers();
@@ -2263,6 +2355,7 @@ loadExpandedFolders();
 loadWorkspace();
 loadVersions();
 loadTools();
+loadProjectMemory();
 
 // 添加模板生成按钮到新建菜单
 const newItemMenuElement = newItemMenu;
