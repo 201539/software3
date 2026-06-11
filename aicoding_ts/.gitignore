@@ -10,5 +10,8 @@ mydocs/**
 !mydocs/CHANGELOG.md
 .playwright-mcp
 
+# 临时调试截图(playwright/手动产物)
+*.png
+
 todo/
 测试/
