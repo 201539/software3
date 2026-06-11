@@ -27,6 +27,6 @@ aicoding_ts:build:
     - aicoding_ts
   interruptible: true
   script:
-    - cd aicoding_ts
+    - Set-Location -LiteralPath (Join-Path $env:CI_PROJECT_DIR 'aicoding_ts')
     - npm ci
     - npm run build:web
