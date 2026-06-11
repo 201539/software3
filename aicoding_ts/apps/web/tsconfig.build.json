@@ -11,6 +11,15 @@
     "strict": true,
     "lib": ["ES2022", "DOM", "DOM.Iterable"]
   },
-  "include": ["app.ts", "mcp-config.ts"],
+  "include": [
+    "app.ts",
+    "mcp-config.ts",
+    "shared.ts",
+    "project-memory.ts",
+    "whitelist.ts",
+    "snapshots.ts",
+    "tools.ts",
+    "skills.ts"
+  ],
   "exclude": ["dist"]
 }
