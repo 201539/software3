@@ -45,6 +45,7 @@ export type TaskSummary = {
   summary: string;
   toolsUsed: string[];
   filesModified: string[];
+  skillsUsed?: string[];
 };
 
 // ── 会话对象 ──
@@ -156,6 +157,15 @@ export type SessionEvent = {
   isNew: boolean;
 };
 
+export type SkillEvent = {
+  type: 'skill';
+  skill: string;
+  action: 'listed' | 'read' | 'activated' | 'deactivated';
+  trigger?: 'implicit' | 'explicit';
+  reason?: string;
+  summary?: string;
+};
+
 export type AgentEvent =
   | ChunkEvent
   | ToolEvent
@@ -166,7 +176,8 @@ export type AgentEvent =
   | CommandConfirmRequestEvent
   | ConfirmResolvedEvent
   | TaskStatusEvent
-  | SessionEvent;
+  | SessionEvent
+  | SkillEvent;
 
 // ── 挂起确认（服务端内存中维护）──
 

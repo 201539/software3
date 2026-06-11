@@ -171,3 +171,60 @@ export const LOCAL_TOOL_DEFINITIONS = [
     },
   },
 ];
+
+export const SKILL_TOOL_DEFINITIONS = [
+  {
+    type: 'function' as const,
+    function: {
+      name: 'list_skills',
+      description: '列出当前可用 Skill 摘要，包括名称、描述、来源和启用状态。',
+      parameters: { type: 'object', properties: {}, additionalProperties: false },
+    },
+  },
+  {
+    type: 'function' as const,
+    function: {
+      name: 'read_skill',
+      description: '在使用某个 Skill 前读取完整 SKILL.md 指南。',
+      parameters: {
+        type: 'object',
+        properties: { name: { type: 'string' } },
+        required: ['name'],
+        additionalProperties: false,
+      },
+    },
+  },
+  {
+    type: 'function' as const,
+    function: {
+      name: 'activate_skill',
+      description: '确认本任务使用某个 Skill，并记录触发方式和原因。',
+      parameters: {
+        type: 'object',
+        properties: {
+          name: { type: 'string' },
+          trigger: { type: 'string', enum: ['implicit', 'explicit'] },
+          reason: { type: 'string' },
+        },
+        required: ['name'],
+        additionalProperties: false,
+      },
+    },
+  },
+  {
+    type: 'function' as const,
+    function: {
+      name: 'deactivate_skill',
+      description: '停止在当前任务中使用某个 Skill。',
+      parameters: {
+        type: 'object',
+        properties: {
+          name: { type: 'string' },
+          reason: { type: 'string' },
+        },
+        required: ['name'],
+        additionalProperties: false,
+      },
+    },
+  },
+];

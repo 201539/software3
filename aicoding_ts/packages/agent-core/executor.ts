@@ -3,7 +3,8 @@ import type { ChatMessage, AssistantMessage, ToolResultMessage, ToolCall, AgentE
 import type { ExternalMcpTool } from '../mcp-client/index.ts';
 import type { CommandConfirmHook } from '../tool-gateway/run-command.ts';
 import { enrichToolResult } from '../tool-gateway/tool-fallback.ts';
-import { LOCAL_TOOL_DEFINITIONS } from './tool-definitions.ts';
+import type { SkillActivationResult, SkillReadResult, SkillSummary, SkillTrigger } from '../skill-system/index.ts';
+import { LOCAL_TOOL_DEFINITIONS, SKILL_TOOL_DEFINITIONS } from './tool-definitions.ts';
 
 type ToolGateway = {
   readFile: (path: string) => Promise<unknown> | unknown;
@@ -27,6 +28,13 @@ type ExternalMcpRegistry = {
   normalizeToolName: (serverName: string, toolName: string) => string;
 };
 
+type SkillRegistry = {
+  listSkills: () => SkillSummary[];
+  readSkill: (name: string) => SkillReadResult;
+  activateSkill: (name: string, trigger: SkillTrigger, reason?: string) => SkillActivationResult;
+  deactivateSkill: (name: string, reason?: string) => SkillActivationResult;
+};
+
 export type ConfirmHook = (question: string, options?: string[]) => Promise<string>;
 
 export type LoopResult = {
@@ -34,6 +42,7 @@ export type LoopResult = {
   finalContent: string;
   toolsUsed: string[];
   filesModified: string[];
+  skillsUsed: string[];
 };
 
 const MAX_ITERATIONS = 20;
@@ -76,7 +85,7 @@ export type ExecutorHooks = {
   onCommandConfirm?: CommandConfirmHook;
 };
 
-export function createExecutor(toolGateway: ToolGateway, externalMcpRegistry?: ExternalMcpRegistry) {
+export function createExecutor(toolGateway: ToolGateway, externalMcpRegistry?: ExternalMcpRegistry, skillRegistry?: SkillRegistry) {
   const toolFns: Record<string, (args: Record<string, unknown>) => unknown> = {
     read_file: ({ path }) => toolGateway.readFile(path as string),
     write_file: ({ path, content }) => toolGateway.writeFile(path as string, content as string),
@@ -102,7 +111,8 @@ export function createExecutor(toolGateway: ToolGateway, externalMcpRegistry?: E
   }
 
   async function buildToolDefinitions() {
-    const localTools = filterEnabledTools(LOCAL_TOOL_DEFINITIONS);
+    const localDefinitions = skillRegistry ? [...LOCAL_TOOL_DEFINITIONS, ...SKILL_TOOL_DEFINITIONS] : LOCAL_TOOL_DEFINITIONS;
+    const localTools = filterEnabledTools(localDefinitions);
     if (!externalMcpRegistry || !externalMcpRegistry.hasExternalTools()) return localTools;
 
     const externalTools = await externalMcpRegistry.listTools();
@@ -137,6 +147,7 @@ export function createExecutor(toolGateway: ToolGateway, externalMcpRegistry?: E
       const loopMessages: ChatMessage[] = [];
       const toolsUsed: string[] = [];
       const filesModified: string[] = [];
+      const skillsUsed: string[] = [];
       let finalContent = '';
 
       for (let i = 0; i < MAX_ITERATIONS; i++) {
@@ -191,8 +202,32 @@ export function createExecutor(toolGateway: ToolGateway, externalMcpRegistry?: E
             let args: Record<string, unknown> = {};
             try { args = JSON.parse(call.function.arguments || '{}'); } catch { /* ignore */ }
 
-            const fn = toolFns[toolName];
-            if (fn) {
+            if (toolName === 'list_skills' && skillRegistry) {
+              toolResult = { skills: skillRegistry.listSkills() };
+              onEvent({ type: 'skill', skill: '*', action: 'listed', summary: 'Listed available skills' });
+            } else if (toolName === 'read_skill' && skillRegistry) {
+              const name = String(args.name ?? '');
+              toolResult = skillRegistry.readSkill(name);
+              if ((toolResult as SkillReadResult).ok) {
+                onEvent({ type: 'skill', skill: name, action: 'read', summary: `Loaded skill: ${name}` });
+              }
+            } else if (toolName === 'activate_skill' && skillRegistry) {
+              const name = String(args.name ?? '');
+              const trigger = args.trigger === 'explicit' ? 'explicit' : 'implicit';
+              const reason = typeof args.reason === 'string' ? args.reason : undefined;
+              toolResult = skillRegistry.activateSkill(name, trigger, reason);
+              if ((toolResult as SkillActivationResult).ok) {
+                if (!skillsUsed.includes(name)) skillsUsed.push(name);
+                onEvent({ type: 'skill', skill: name, action: 'activated', trigger, reason, summary: `Activated skill: ${name}` });
+              }
+            } else if (toolName === 'deactivate_skill' && skillRegistry) {
+              const name = String(args.name ?? '');
+              const reason = typeof args.reason === 'string' ? args.reason : undefined;
+              toolResult = skillRegistry.deactivateSkill(name, reason);
+              onEvent({ type: 'skill', skill: name, action: 'deactivated', reason, summary: `Deactivated skill: ${name}` });
+            } else {
+              const fn = toolFns[toolName];
+              if (fn) {
               try {
                 if (toolName === 'run_command' && onCommandConfirm) {
                   toolResult = await toolGateway.runCommand(args.command as string, {
@@ -212,6 +247,7 @@ export function createExecutor(toolGateway: ToolGateway, externalMcpRegistry?: E
               }
             } else {
               toolResult = { error: `未知工具: ${toolName}` };
+            }
             }
 
             toolResult = enrichToolResult(toolName, toolResult);
@@ -241,7 +277,7 @@ export function createExecutor(toolGateway: ToolGateway, externalMcpRegistry?: E
         }
       }
 
-      return { messages: loopMessages, finalContent, toolsUsed, filesModified };
+      return { messages: loopMessages, finalContent, toolsUsed, filesModified, skillsUsed };
     },
   };
 }

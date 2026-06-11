@@ -18,6 +18,7 @@ import { createMcpClient } from "./mcp-client.ts";
 import { createExternalMcpRegistry } from "../mcp-client/index.ts";
 import { createTemplateGenerator } from "../template-generator/index.ts";
 import type { TemplateParams } from "../template-generator/types.ts";
+import { buildAvailableSkillsBlock, createSkillRegistry, parseExplicitInvocations } from "../skill-system/index.ts";
 
 type Context = {
   prompt: string;
@@ -57,6 +58,8 @@ type ContextBuilder = {
   buildForPrompt: (prompt: string, selectedFile?: string | null, options?: { projectMemory?: string }) => Promise<Context>;
 };
 
+type SkillRegistry = ReturnType<typeof createSkillRegistry>;
+
 function truncateMessages(messages: ChatMessage[], maxCount = 40): ChatMessage[] {
   if (messages.length <= maxCount) return messages;
   const tail = messages.slice(-maxCount);
@@ -80,9 +83,18 @@ function buildSystemPrompt(
   context: Context,
   projectMemory: string,
   taskSummaries: TaskSummary[],
+  skillsBlock = '',
 ): string {
   const parts = [
     '你是一个 AI Coding Agent，负责在工作区中执行编码任务。',
+    '在开始使用普通工具前，必须先检查 Available Skills。若某个 Skill 的 description 与用户任务直接匹配，必须先调用 read_skill；读取后若确认适用，再调用 activate_skill，并按 SKILL.md 执行。只有没有匹配 Skill 时，才直接使用普通工具。',
+  ];
+
+  if (skillsBlock.trim()) {
+    parts.push('', skillsBlock.trim());
+  }
+
+  parts.push(
     '优先使用工具完成文件读取、写入和命令执行，不要编造工具执行结果。',
     '如果是修改已有文件，优先使用 patch_file 做局部修改；只有新建文件、整文件重写或 patch 失败时才使用 write_file。',
     '如需先定位目标，可先调用 search_in_workspace。',
@@ -93,7 +105,7 @@ function buildSystemPrompt(
     '',
     `## 工作区概况`,
     context.workspaceSummary || '（工作区为空）',
-  ];
+  );
 
   const retrievedMemory = context.projectMemorySummary?.trim() || projectMemory.trim();
   if (retrievedMemory) {
@@ -112,14 +124,22 @@ function buildSystemPrompt(
   return parts.join('\n');
 }
 
+function buildSkillsBlock(skillRegistry: SkillRegistry | undefined, prompt: string): string {
+  if (!skillRegistry) return '';
+  const skillSummaries = skillRegistry.listImplicitCandidates();
+  const explicitSkillInvocations = parseExplicitInvocations(prompt, skillRegistry.listSkills());
+  return buildAvailableSkillsBlock(skillSummaries, explicitSkillInvocations);
+}
+
 export function createAgentCore(
   contextBuilder: ContextBuilder,
   toolGateway: ToolGateway,
   llmClient: LlmClient,
   sessionStore?: SessionStore,
   externalMcpRegistry?: ReturnType<typeof createExternalMcpRegistry>,
+  skillRegistry?: SkillRegistry,
 ) {
-  const executor = createExecutor(toolGateway, externalMcpRegistry);
+  const executor = createExecutor(toolGateway, externalMcpRegistry, skillRegistry);
   const reviewer = createReviewer();
   const summarizer = createSummarizer();
   const templateGenerator = createTemplateGenerator();
@@ -144,10 +164,11 @@ export function createAgentCore(
 
     const projectMemory = await sessionStore.readProjectMemory();
     const context = await contextBuilder.buildForPrompt(userPrompt, selectedFile, { projectMemory });
+    const skillsBlock = buildSkillsBlock(skillRegistry, userPrompt);
 
     const systemMsg: SystemMessage = {
       role: 'system',
-      content: buildSystemPrompt(context, projectMemory, session.taskSummaries),
+      content: buildSystemPrompt(context, projectMemory, session.taskSummaries, skillsBlock),
     };
 
     const userMsg: UserMessage = { role: 'user', content: userPrompt };
@@ -189,6 +210,7 @@ export function createAgentCore(
       summary: memorySuggestion ? `${summaryText}\n\n${memorySuggestion}` : summaryText,
       toolsUsed: loopResult.toolsUsed,
       filesModified: loopResult.filesModified,
+      skillsUsed: loopResult.skillsUsed,
     };
 
     await sessionStore.appendTaskSummary(sessionId, taskSummary);
@@ -206,6 +228,7 @@ export function createAgentCore(
     onChunk: ((chunk: unknown) => void) | null = null,
   ) {
     const context = await contextBuilder.buildForPrompt(prompt, selectedFile);
+    const skillsBlock = buildSkillsBlock(skillRegistry, prompt);
 
     if (llmClient.model === 'mock') {
       const fallback = '理解需求；构建上下文；生成/修改文件；执行命令验证；回显结果。';
@@ -215,7 +238,7 @@ export function createAgentCore(
 
     const systemMsg: SystemMessage = {
       role: 'system',
-      content: buildSystemPrompt(context, '', []),
+      content: buildSystemPrompt(context, '', [], skillsBlock),
     };
     const userMsg: UserMessage = { role: 'user', content: prompt };
     const messages: ChatMessage[] = [systemMsg, userMsg];
@@ -234,6 +257,7 @@ export function createAgentCore(
       output: loopResult.finalContent,
       toolsUsed: loopResult.toolsUsed,
       filesModified: loopResult.filesModified,
+      skillsUsed: loopResult.skillsUsed,
       toolResults,
     });
   }

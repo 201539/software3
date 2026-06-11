@@ -12,6 +12,7 @@ import { validateCommand } from '../../packages/tool-gateway/command-safety.ts';
 import type { CommandConfirmHook } from '../../packages/tool-gateway/run-command.ts';
 import type { McpJsonRpcRequest } from '../../packages/mcp-server/index.ts';
 import { createExternalMcpRegistry, type ExternalMcpServerConfig } from '../../packages/mcp-client/index.ts';
+import { createSkillRegistry, importSkill, previewSkillImport, type SkillImportRequest } from '../../packages/skill-system/index.ts';
 
 type RequestContext = {
   path?: string;
@@ -73,6 +74,7 @@ type ToolGateway = ReturnType<typeof createToolGateway>;
 type WorkspaceManager = ReturnType<typeof createWorkspaceManager>;
 type AgentCore = ReturnType<typeof createAgentCore>;
 type SessionStore = ReturnType<typeof createSessionStore>;
+type SkillRegistry = ReturnType<typeof createSkillRegistry>;
 
 const CONFIRM_TIMEOUT_MS = 5 * 60 * 1000;
 
@@ -208,10 +210,14 @@ const externalMcpConfigs: ExternalMcpServerConfig[] = (() => {
   }
 })();
 const externalMcpRegistry = createExternalMcpRegistry(externalMcpConfigs);
-const agentCore: AgentCore = createAgentCore(contextBuilder, toolGateway, llmClient, sessionStore, externalMcpRegistry);
+const skillRegistry: SkillRegistry = createSkillRegistry({
+  workspaceRoot: workspaceManager.getRootDir(),
+});
+const agentCore: AgentCore = createAgentCore(contextBuilder, toolGateway, llmClient, sessionStore, externalMcpRegistry, skillRegistry);
 
 await workspaceManager.loadFromDisk();
 await sessionStore.getOrCreateCurrentSession();
+await skillRegistry.loadAll();
 
 // ── 静态文件 ──
 async function tryReadStaticFile(pathname: string) {
@@ -422,6 +428,64 @@ export function startRuntimeServer() {
       return;
     }
 
+    // ── Skill 管理 API ──
+    if (url.pathname === '/api/skills' && req.method === 'GET') {
+      sendJson(res, 200, { skills: skillRegistry.listSkills() });
+      return;
+    }
+
+    if (url.pathname === '/api/skills/reload' && req.method === 'POST') {
+      await skillRegistry.reload();
+      sendJson(res, 200, { ok: true, skills: skillRegistry.listSkills() });
+      return;
+    }
+
+    if (url.pathname === '/api/skills/import/preview' && req.method === 'POST') {
+      const parsed = await parseBody<SkillImportRequest>(req);
+      const result = await previewSkillImport(workspaceManager.getRootDir(), parsed);
+      sendJson(res, result.ok ? 200 : 400, result);
+      return;
+    }
+
+    if (url.pathname === '/api/skills/import' && req.method === 'POST') {
+      const parsed = await parseBody<SkillImportRequest>(req);
+      const result = await importSkill(workspaceManager.getRootDir(), parsed);
+      if (result.ok) await skillRegistry.reload();
+      sendJson(res, result.ok ? 200 : 400, result.ok ? { ...result, skills: skillRegistry.listSkills() } : result);
+      return;
+    }
+
+    if (url.pathname.startsWith('/api/skills/') && req.method === 'GET') {
+      const name = decodeURIComponent(url.pathname.replace('/api/skills/', ''));
+      const skill = skillRegistry.getSkill(name);
+      if (!skill) {
+        sendJson(res, 404, { error: 'Skill not found' });
+        return;
+      }
+      sendJson(res, 200, { skill });
+      return;
+    }
+
+    if (url.pathname.startsWith('/api/skills/') && req.method === 'PATCH') {
+      const name = decodeURIComponent(url.pathname.replace('/api/skills/', ''));
+      const { enabled } = await parseBody<{ enabled?: boolean }>(req);
+      if (typeof enabled !== 'boolean') {
+        sendJson(res, 400, { error: 'enabled field required' });
+        return;
+      }
+      const ok = await skillRegistry.setEnabled(name, enabled);
+      sendJson(res, ok ? 200 : 404, ok ? { ok: true, name, enabled } : { error: 'Skill not found' });
+      return;
+    }
+
+    if (url.pathname.startsWith('/api/skills/') && req.method === 'DELETE') {
+      const name = decodeURIComponent(url.pathname.replace('/api/skills/', ''));
+      const { rootPath } = await parseBody<{ rootPath?: string }>(req);
+      const result = await skillRegistry.deleteSkill(name, rootPath);
+      sendJson(res, result.ok ? 200 : 400, result.ok ? { ...result, skills: skillRegistry.listSkills() } : result);
+      return;
+    }
+
     // ── POST /api/workspace/load（切换工作区目录）──
     if (url.pathname === '/api/project-memory' && req.method === 'GET') {
       sendJson(res, 200, await sessionStore.getProjectMemory());
@@ -458,6 +522,8 @@ export function startRuntimeServer() {
       }
       try {
         const tree = await workspaceManager.switchRoot(dirPath);
+        skillRegistry.setWorkspaceRoot(workspaceManager.getRootDir());
+        await skillRegistry.reload();
         const newSession = await sessionStore.createSession();
         sendJson(res, 200, {
           ok: true,

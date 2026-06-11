@@ -150,6 +150,19 @@
           </div>
           <div id="toolList" class="version-list"></div>
         </section>
+        <section class="version-card" id="skillManagement">
+          <div class="version-card-header">
+            <div>
+              <strong>Skill 管理</strong>
+              <span id="skillStatus">加载中…</span>
+            </div>
+            <div class="skill-header-actions">
+              <button id="importSkillBtn" type="button" class="ghost-button">导入</button>
+              <button id="refreshSkillsBtn" type="button" class="ghost-button">刷新</button>
+            </div>
+          </div>
+          <div id="skillList" class="version-list"></div>
+        </section>
         <section class="version-card" id="commandWhitelistSection">
           <div class="version-card-header">
             <div>
@@ -201,6 +214,34 @@
           <button type="button" id="commandConfirmDenyBtn" class="ghost-button">拒绝</button>
           <button type="button" id="commandConfirmOnceBtn">允许一次</button>
           <button type="button" id="commandConfirmWhitelistBtn" class="confirm-submit-btn">加入白名单并执行</button>
+        </div>
+      </div>
+    </div>
+    <div id="skillImportOverlay" class="tree-dialog-overlay" aria-hidden="true">
+      <div class="tree-dialog skill-import-dialog">
+        <h3>导入 Skill</h3>
+        <div class="skill-import-tabs">
+          <label><input type="radio" name="skillImportMode" value="local_path" checked> 本地目录</label>
+          <label><input type="radio" name="skillImportMode" value="workspace_path"> 项目路径</label>
+          <label><input type="radio" name="skillImportMode" value="inline_markdown"> 粘贴内容</label>
+        </div>
+        <label class="tree-dialog-field" id="skillImportPathField">
+          <span>路径</span>
+          <input id="skillImportPathInput" type="text" placeholder="D:\external-skills\my-skill">
+        </label>
+        <label class="tree-dialog-field" id="skillImportNameField">
+          <span>Skill 名称</span>
+          <input id="skillImportNameInput" type="text" placeholder="my-skill">
+        </label>
+        <label class="tree-dialog-field" id="skillImportContentField">
+          <span>SKILL.md</span>
+          <textarea id="skillImportContentInput" rows="10" placeholder="---&#10;name: my-skill&#10;description: Use when...&#10;---"></textarea>
+        </label>
+        <div id="skillImportReport" class="skill-import-report">尚未预检查</div>
+        <div class="tree-dialog-actions">
+          <button id="skillImportPreviewBtn" type="button" class="ghost-button">预检查</button>
+          <button id="skillImportConfirmBtn" type="button" class="primary-button" disabled>确认导入</button>
+          <button id="skillImportCloseBtn" type="button" class="ghost-button">取消</button>
         </div>
       </div>
     </div>

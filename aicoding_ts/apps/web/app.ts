@@ -61,6 +61,15 @@ type ToolEvent = {
   detail?: string;
 };
 
+type SkillEvent = {
+  type: 'skill';
+  skill: string;
+  action: 'listed' | 'read' | 'activated' | 'deactivated';
+  trigger?: 'implicit' | 'explicit';
+  reason?: string;
+  summary?: string;
+};
+
 type PreviewResult = {
   taskId?: string;
   prompt?: string;
@@ -83,6 +92,48 @@ type ToolInfo = {
   successCount: number;
   avgDurationMs: number;
   lastCalledAt: string | null;
+};
+
+type SkillInfo = {
+  name: string;
+  description: string;
+  source: 'builtin' | 'project' | 'user' | 'imported';
+  rootPath: string;
+  skillFilePath: string;
+  enabled: boolean;
+  allowImplicitInvocation: boolean;
+  userInvocable: boolean;
+  tags: string[];
+  filePatterns: string[];
+  requiredCapabilities: string[];
+  optionalCapabilities: string[];
+  missingCapabilities: string[];
+  shadowed: boolean;
+  usage: {
+    readCount: number;
+    activationCount: number;
+    lastUsedAt: string | null;
+  };
+};
+
+type SkillImportMode = 'local_path' | 'workspace_path' | 'inline_markdown';
+
+type SkillImportReport = {
+  recognized: boolean;
+  format: string;
+  name: string;
+  description: string;
+  sourceMode: SkillImportMode;
+  targetPath: string;
+  allowImplicitInvocation: boolean;
+  userInvocable: boolean;
+  requiredCapabilities: string[];
+  optionalCapabilities: string[];
+  missingCapabilities: string[];
+  resources: string[];
+  scripts: string[];
+  warnings: string[];
+  conflicts: string[];
 };
 
 type VersionSnapshot = {
@@ -803,6 +854,8 @@ const TOOL_COLORS: Record<string, string> = {
   list_workspace: 'var(--muted)',
 };
 
+const skillCallCards = new Map<string, HTMLElement>();
+
 function formatToolDetailForChat(toolName: string, rawDetail: string): string {
   if (toolName !== 'diff_file') return rawDetail;
   try {
@@ -837,6 +890,44 @@ function appendMessage(role: string, text: string) {
   chatLog.appendChild(div);
   chatLog.scrollTop = chatLog.scrollHeight;
   return div;
+}
+
+function appendSkillEvent(event: SkillEvent) {
+  if (event.action === 'listed') return;
+
+  let node = skillCallCards.get(event.skill);
+  if (!node) {
+    node = document.createElement('div');
+    node.className = 'skill-call';
+
+    const header = document.createElement('div');
+    header.className = 'skill-call-header';
+
+    const badge = document.createElement('span');
+    badge.className = 'skill-call-badge';
+    badge.textContent = 'Skill';
+
+    const title = document.createElement('span');
+    title.className = 'skill-call-title';
+    title.textContent = `${event.action === 'read' ? '加载' : '启用'} Skill：${event.skill}`;
+
+    const detail = document.createElement('div');
+    detail.className = 'skill-call-reason';
+    detail.textContent = event.summary || '已处理该 Skill。';
+
+    header.appendChild(badge);
+    header.appendChild(title);
+    node.appendChild(header);
+    node.appendChild(detail);
+    skillCallCards.set(event.skill, node);
+    chatLog.appendChild(node);
+  }
+
+  const detail = node.querySelector<HTMLElement>('.skill-call-reason');
+  if (detail) {
+    detail.textContent = event.reason || event.summary || '已处理该 Skill。';
+  }
+  chatLog.scrollTop = chatLog.scrollHeight;
 }
 
 function renderConfirmCard(event: { confirmId: string; question: string; options?: string[] }) {
@@ -1770,6 +1861,7 @@ async function streamGenerateScaffold(projectName: string, templateId: string) {
 }
 
 async function streamChat(prompt: string) {
+  skillCallCards.clear();
   const response = await fetch('/api/agent/chat', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
@@ -1862,6 +1954,7 @@ async function streamChat(prompt: string) {
       try {
         const event = JSON.parse(payload) as
           | ToolEvent
+          | SkillEvent
           | { type: 'chunk'; chunk: string }
           | { type: 'result'; result: PreviewResult }
           | { type: 'error'; message: string }
@@ -1892,6 +1985,11 @@ async function streamChat(prompt: string) {
           if (event.tool === 'write_file' || event.tool === 'patch_file') {
             sawWriteFileSuccess = true;
             scheduleWorkspaceRefresh(300);
+          }
+        } else if (event.type === 'skill') {
+          appendSkillEvent(event);
+          if (event.action === 'activated') {
+            void loadSkills();
           }
         } else if (event.type === 'result') {
           finalResult = event.result as PreviewResult;
@@ -2485,6 +2583,266 @@ async function toggleToolEnabled(toolName: string, enabled: boolean) {
 
 refreshToolsBtnEl.addEventListener('click', loadTools);
 
+// ── Skill 管理 ──
+const skillList = document.querySelector<HTMLElement>('#skillList')!;
+const skillStatus = document.querySelector<HTMLElement>('#skillStatus')!;
+const refreshSkillsBtnEl = document.querySelector<HTMLButtonElement>('#refreshSkillsBtn')!;
+const importSkillBtnEl = document.querySelector<HTMLButtonElement>('#importSkillBtn')!;
+const skillImportOverlay = document.querySelector<HTMLElement>('#skillImportOverlay')!;
+const skillImportPathField = document.querySelector<HTMLElement>('#skillImportPathField')!;
+const skillImportNameField = document.querySelector<HTMLElement>('#skillImportNameField')!;
+const skillImportContentField = document.querySelector<HTMLElement>('#skillImportContentField')!;
+const skillImportPathInput = document.querySelector<HTMLInputElement>('#skillImportPathInput')!;
+const skillImportNameInput = document.querySelector<HTMLInputElement>('#skillImportNameInput')!;
+const skillImportContentInput = document.querySelector<HTMLTextAreaElement>('#skillImportContentInput')!;
+const skillImportReportEl = document.querySelector<HTMLElement>('#skillImportReport')!;
+const skillImportPreviewBtn = document.querySelector<HTMLButtonElement>('#skillImportPreviewBtn')!;
+const skillImportConfirmBtn = document.querySelector<HTMLButtonElement>('#skillImportConfirmBtn')!;
+const skillImportCloseBtn = document.querySelector<HTMLButtonElement>('#skillImportCloseBtn')!;
+
+let skillCache: SkillInfo[] = [];
+let latestSkillImportReport: SkillImportReport | null = null;
+
+function formatSkillSource(source: SkillInfo['source']) {
+  const labels: Record<SkillInfo['source'], string> = {
+    builtin: '内置',
+    project: '项目',
+    user: '用户',
+    imported: '导入',
+  };
+  return labels[source] ?? source;
+}
+
+function formatLastUsed(value: string | null) {
+  if (!value) return '从未使用';
+  return new Date(value).toLocaleString('zh-CN', { hour12: false });
+}
+
+async function loadSkills() {
+  try {
+    const res = await fetch('/api/skills');
+    const data = await res.json() as { skills?: SkillInfo[] };
+    skillCache = data.skills ?? [];
+    const enabledCount = skillCache.filter((skill) => skill.enabled).length;
+    skillStatus.textContent = `${enabledCount}/${skillCache.length} 已启用`;
+    renderSkillCards();
+  } catch {
+    skillStatus.textContent = '加载失败';
+    skillList.innerHTML = '<div class="version-empty">Skill 列表加载失败</div>';
+  }
+}
+
+function renderSkillCards() {
+  skillList.innerHTML = '';
+  if (skillCache.length === 0) {
+    skillList.innerHTML = '<div class="version-empty">暂无 Skill</div>';
+    return;
+  }
+
+  skillCache.forEach((skill) => {
+    const card = document.createElement('div');
+    card.className = 'skill-item';
+
+    const sourceClass = skill.source === 'builtin' ? 'local' : 'external';
+    const missingText = skill.missingCapabilities.length > 0
+      ? `缺失能力：${skill.missingCapabilities.join(', ')}`
+      : '能力满足';
+
+    card.innerHTML = `
+      <div class="tool-item-header">
+        <span class="tool-item-name">${skill.name}</span>
+        <span class="tool-item-source ${sourceClass}">${formatSkillSource(skill.source)}</span>
+      </div>
+      <div class="tool-item-desc">${skill.description}</div>
+      <div class="tool-item-stats">
+        <span>读取 ${skill.usage.readCount} 次</span>
+        <span>启用 ${skill.usage.activationCount} 次</span>
+        <span>${skill.allowImplicitInvocation ? '允许隐式触发' : '仅显式触发'}</span>
+      </div>
+      <div class="skill-meta">最近使用：${formatLastUsed(skill.usage.lastUsedAt)}</div>
+      <div class="${skill.missingCapabilities.length > 0 ? 'skill-warning' : 'skill-ok'}">${missingText}</div>
+      <div class="skill-actions">
+        <div class="tool-toggle" data-skill="${skill.name}">
+          <span>${skill.enabled ? '已启用' : '已禁用'}</span>
+          <div class="tool-toggle-switch${skill.enabled ? ' on' : ''}"></div>
+        </div>
+      </div>
+      <details class="skill-details">
+        <summary>详情</summary>
+        <div class="skill-detail-body">${[
+          `路径规则：${skill.filePatterns.length ? skill.filePatterns.join(', ') : '无'}`,
+          `标签：${skill.tags.length ? skill.tags.join(', ') : '无'}`,
+          `Shadowed：${skill.shadowed ? '是' : '否'}`,
+        ].join('\n')}</div>
+      </details>
+    `;
+
+    card.querySelector<HTMLElement>('.tool-toggle')!
+      .addEventListener('click', () => toggleSkillEnabled(skill.name, !skill.enabled));
+
+    if (skill.source === 'project' || skill.source === 'imported') {
+      const actions = card.querySelector<HTMLElement>('.skill-actions')!;
+      const deleteBtn = document.createElement('button');
+      deleteBtn.type = 'button';
+      deleteBtn.className = 'skill-delete-button';
+      deleteBtn.textContent = '删除';
+      deleteBtn.addEventListener('click', () => deleteSkill(skill));
+      actions.appendChild(deleteBtn);
+    }
+
+    skillList.appendChild(card);
+  });
+}
+
+async function toggleSkillEnabled(skillName: string, enabled: boolean) {
+  const res = await fetch(`/api/skills/${encodeURIComponent(skillName)}`, {
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ enabled }),
+  });
+  if (!res.ok) {
+    showToast({ kind: 'error', title: '操作失败', message: '无法更新 Skill 状态' });
+    return;
+  }
+  const skill = skillCache.find((item) => item.name === skillName);
+  if (skill) skill.enabled = enabled;
+  const enabledCount = skillCache.filter((item) => item.enabled).length;
+  skillStatus.textContent = `${enabledCount}/${skillCache.length} 已启用`;
+  renderSkillCards();
+}
+
+async function deleteSkill(skill: SkillInfo) {
+  const confirmed = window.confirm(`确定删除 Skill "${skill.name}" 吗？此操作只允许删除项目/导入 Skill。`);
+  if (!confirmed) return;
+
+  const res = await fetch(`/api/skills/${encodeURIComponent(skill.name)}`, {
+    method: 'DELETE',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ rootPath: skill.rootPath }),
+  });
+  const data = await res.json() as { ok?: boolean; error?: string };
+  if (!res.ok || !data.ok) {
+    showToast({ kind: 'error', title: '删除失败', message: data.error ?? '无法删除 Skill' });
+    return;
+  }
+
+  showToast({ kind: 'info', title: 'Skill 已删除', message: skill.name });
+  await loadSkills();
+}
+
+refreshSkillsBtnEl.addEventListener('click', loadSkills);
+
+function getSkillImportMode(): SkillImportMode {
+  const checked = document.querySelector<HTMLInputElement>('input[name="skillImportMode"]:checked');
+  return (checked?.value as SkillImportMode | undefined) ?? 'local_path';
+}
+
+function buildSkillImportPayload(confirm = false) {
+  const mode = getSkillImportMode();
+  const payload: Record<string, unknown> = { mode, confirm };
+  if (mode === 'inline_markdown') {
+    payload.name = skillImportNameInput.value.trim();
+    payload.content = skillImportContentInput.value;
+  } else {
+    payload.path = skillImportPathInput.value.trim();
+  }
+  return payload;
+}
+
+function renderSkillImportForm() {
+  const mode = getSkillImportMode();
+  skillImportPathField.style.display = mode === 'inline_markdown' ? 'none' : 'grid';
+  skillImportNameField.style.display = mode === 'inline_markdown' ? 'grid' : 'none';
+  skillImportContentField.style.display = mode === 'inline_markdown' ? 'grid' : 'none';
+  skillImportPathInput.placeholder = mode === 'workspace_path' ? '.aicoding/skills/my-skill' : 'D:\\external-skills\\my-skill';
+  latestSkillImportReport = null;
+  skillImportConfirmBtn.disabled = true;
+  skillImportReportEl.textContent = '尚未预检查';
+}
+
+function openSkillImportDialog() {
+  skillImportOverlay.classList.add('visible');
+  skillImportOverlay.setAttribute('aria-hidden', 'false');
+  renderSkillImportForm();
+}
+
+function closeSkillImportDialog() {
+  skillImportOverlay.classList.remove('visible');
+  skillImportOverlay.setAttribute('aria-hidden', 'true');
+}
+
+function renderSkillImportReport(report: SkillImportReport) {
+  const lines = [
+    `识别结果：${report.recognized ? '成功' : '失败'}`,
+    `格式：${report.format}`,
+    `名称：${report.name}`,
+    `描述：${report.description}`,
+    `目标位置：${report.targetPath}`,
+    `允许隐式触发：${report.allowImplicitInvocation ? '是' : '否'}`,
+    `需要能力：${report.requiredCapabilities.length ? report.requiredCapabilities.join(', ') : '无'}`,
+    `缺失能力：${report.missingCapabilities.length ? report.missingCapabilities.join(', ') : '无'}`,
+    `资源：${report.resources.length ? report.resources.join(', ') : '无'}`,
+    `脚本：${report.scripts.length ? report.scripts.join(', ') : '无'}`,
+    `风险提示：${report.warnings.length ? report.warnings.join('; ') : '无'}`,
+    `冲突：${report.conflicts.length ? report.conflicts.join('; ') : '无'}`,
+  ];
+  skillImportReportEl.textContent = lines.join('\n');
+}
+
+async function previewSkillImport() {
+  skillImportPreviewBtn.disabled = true;
+  skillImportReportEl.textContent = '正在预检查...';
+  try {
+    const res = await fetch('/api/skills/import/preview', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(buildSkillImportPayload(false)),
+    });
+    const data = await res.json() as { ok?: boolean; report?: SkillImportReport; error?: string };
+    if (!res.ok || !data.ok || !data.report) {
+      latestSkillImportReport = null;
+      skillImportConfirmBtn.disabled = true;
+      skillImportReportEl.textContent = `预检查失败：${data.error ?? '未知错误'}`;
+      return;
+    }
+    latestSkillImportReport = data.report;
+    renderSkillImportReport(data.report);
+    skillImportConfirmBtn.disabled = data.report.conflicts.length > 0;
+  } finally {
+    skillImportPreviewBtn.disabled = false;
+  }
+}
+
+async function confirmSkillImport() {
+  if (!latestSkillImportReport) return;
+  skillImportConfirmBtn.disabled = true;
+  try {
+    const res = await fetch('/api/skills/import', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(buildSkillImportPayload(true)),
+    });
+    const data = await res.json() as { ok?: boolean; error?: string };
+    if (!res.ok || !data.ok) {
+      showToast({ kind: 'error', title: '导入失败', message: data.error ?? '无法导入 Skill' });
+      return;
+    }
+    showToast({ kind: 'info', title: 'Skill 已导入', message: latestSkillImportReport.name });
+    closeSkillImportDialog();
+    await loadSkills();
+  } finally {
+    skillImportConfirmBtn.disabled = false;
+  }
+}
+
+document.querySelectorAll<HTMLInputElement>('input[name="skillImportMode"]').forEach((input) => {
+  input.addEventListener('change', renderSkillImportForm);
+});
+importSkillBtnEl.addEventListener('click', openSkillImportDialog);
+skillImportCloseBtn.addEventListener('click', closeSkillImportDialog);
+skillImportPreviewBtn.addEventListener('click', previewSkillImport);
+skillImportConfirmBtn.addEventListener('click', confirmSkillImport);
+
 // ── 命令白名单 ──
 type WhitelistEntry = {
   id: string;
@@ -2642,6 +3000,7 @@ loadExpandedFolders();
 loadWorkspace();
 loadVersions();
 loadTools();
+loadSkills();
 loadCommandWhitelist();
 loadProjectMemory();
 
