@@ -169,6 +169,20 @@
           </form>
           <div id="whitelistList" class="version-list"></div>
         </section>
+        <section class="version-card" id="projectMemoryPanel">
+          <div class="version-card-header">
+            <div>
+              <strong>项目知识</strong>
+              <span id="projectMemoryStatus">未加载</span>
+            </div>
+            <div class="project-memory-actions">
+              <button id="appendLastTaskMemoryBtn" type="button" class="ghost-button">保存任务经验</button>
+              <button id="reloadProjectMemoryBtn" type="button" class="ghost-button">重载</button>
+              <button id="saveProjectMemoryBtn" type="button" class="ghost-button">保存</button>
+            </div>
+          </div>
+          <textarea id="projectMemoryEditor" class="project-memory-editor" spellcheck="false" placeholder="# 项目记忆"></textarea>
+        </section>
         <pre id="summary" class="summary-box"></pre>
       </section>
     </div>

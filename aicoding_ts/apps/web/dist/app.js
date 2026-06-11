@@ -40,6 +40,11 @@ const newSessionBtn = document.querySelector('#newSessionBtn');
 const workspacePathInput = document.querySelector('#workspacePathInput');
 const workspaceSuggestList = document.querySelector('#workspaceSuggestList');
 const loadWorkspaceBtn = document.querySelector('#loadWorkspaceBtn');
+const projectMemoryEditor = document.querySelector('#projectMemoryEditor');
+const projectMemoryStatus = document.querySelector('#projectMemoryStatus');
+const saveProjectMemoryBtn = document.querySelector('#saveProjectMemoryBtn');
+const reloadProjectMemoryBtn = document.querySelector('#reloadProjectMemoryBtn');
+const appendLastTaskMemoryBtn = document.querySelector('#appendLastTaskMemoryBtn');
 let selectedFile = null;
 let currentFileContent = '';
 let workspaceCache = [];
@@ -61,6 +66,7 @@ let lastFailureText = null;
 let statusHistory = [];
 let lastRunCommandDetail = null;
 let shouldScrollTreeToActive = false;
+let lastProjectMemoryEntry = null;
 const layoutState = {
     chat: 34,
     editor: 40,
@@ -394,6 +400,21 @@ function normalizeToolResults(result) {
         file: item.result?.file,
     }));
 }
+function buildProjectMemoryEntry(result, changedFiles) {
+    if (!result)
+        return null;
+    const prompt = result.prompt?.trim() || lastUserPrompt?.trim();
+    const summaryText = result.summary?.trim() || result.output?.trim();
+    if (!prompt && !summaryText && changedFiles.length === 0)
+        return null;
+    const parts = [
+        prompt ? `任务：${prompt}` : '',
+        summaryText ? `经验：${summaryText.replace(/\s+/g, ' ').slice(0, 260)}` : '',
+        changedFiles.length > 0 ? `相关文件：${changedFiles.slice(0, 5).join('、')}` : '',
+        result.toolsUsed?.length ? `工具：${[...new Set(result.toolsUsed)].slice(0, 5).join('、')}` : '',
+    ].filter(Boolean);
+    return parts.join('；');
+}
 function renderStructuredSummary(result) {
     const toolResults = normalizeToolResults(result);
     const changedFiles = new Set();
@@ -456,6 +477,8 @@ function renderStructuredSummary(result) {
     };
     if (!result) {
         mkRow('状态', mkValue('暂无摘要（等待任务运行）。'));
+        lastProjectMemoryEntry = null;
+        appendLastTaskMemoryBtn.disabled = true;
         return;
     }
     mkRow('当前阶段', mkValue(lastTaskPhase));
@@ -482,6 +505,8 @@ function renderStructuredSummary(result) {
             .join(' / ');
         mkRow('工具调用', mkValue(brief));
     }
+    lastProjectMemoryEntry = buildProjectMemoryEntry(result, [...changedFiles]);
+    appendLastTaskMemoryBtn.disabled = !lastProjectMemoryEntry;
 }
 // ── 工作区历史记录 ──
 const WORKSPACE_HISTORY_KEY = 'workspaceHistory';
@@ -2342,6 +2367,71 @@ whitelistAddForm.addEventListener('submit', async (e) => {
     showToast({ kind: 'info', title: '已添加', message: `白名单：${pattern}` });
 });
 refreshWhitelistBtn.addEventListener('click', loadCommandWhitelist);
+async function loadProjectMemory() {
+    try {
+        projectMemoryStatus.textContent = '加载中…';
+        const res = await fetch('/api/project-memory');
+        if (!res.ok)
+            throw new Error('项目知识加载失败');
+        const data = await res.json();
+        projectMemoryEditor.value = data.content || data.template || '# 项目记忆\n';
+        projectMemoryStatus.textContent = data.exists ? '已加载' : '使用默认模板';
+    }
+    catch (error) {
+        projectMemoryStatus.textContent = '加载失败';
+        showToast({ kind: 'error', title: '项目知识加载失败', message: error.message });
+    }
+}
+async function saveProjectMemory() {
+    try {
+        projectMemoryStatus.textContent = '保存中…';
+        const res = await fetch('/api/project-memory', {
+            method: 'PUT',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ content: projectMemoryEditor.value }),
+        });
+        if (!res.ok)
+            throw new Error('项目知识保存失败');
+        const data = await res.json();
+        if (typeof data.content === 'string')
+            projectMemoryEditor.value = data.content;
+        projectMemoryStatus.textContent = data.updatedAt ? `已保存 ${new Date(data.updatedAt).toLocaleTimeString('zh-CN', { hour12: false })}` : '已保存';
+        showToast({ kind: 'info', title: '项目知识已保存', message: '后续会话会按任务自动检索这份知识。' });
+    }
+    catch (error) {
+        projectMemoryStatus.textContent = '保存失败';
+        showToast({ kind: 'error', title: '项目知识保存失败', message: error.message });
+    }
+}
+async function appendLastTaskMemory() {
+    if (!lastProjectMemoryEntry) {
+        showToast({ kind: 'warn', title: '暂无可保存经验', message: '完成一次任务后再保存到项目知识。' });
+        return;
+    }
+    try {
+        appendLastTaskMemoryBtn.disabled = true;
+        const res = await fetch('/api/project-memory/append', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ section: 'Agent 任务经验', entry: lastProjectMemoryEntry }),
+        });
+        if (!res.ok)
+            throw new Error('任务经验保存失败');
+        const data = await res.json();
+        if (typeof data.content === 'string')
+            projectMemoryEditor.value = data.content;
+        projectMemoryStatus.textContent = data.updatedAt ? `已追加 ${new Date(data.updatedAt).toLocaleTimeString('zh-CN', { hour12: false })}` : '已追加';
+        showToast({ kind: 'info', title: '任务经验已保存', message: '这条经验将参与后续会话的上下文检索。' });
+    }
+    catch (error) {
+        appendLastTaskMemoryBtn.disabled = false;
+        showToast({ kind: 'error', title: '保存任务经验失败', message: error.message });
+    }
+}
+saveProjectMemoryBtn.addEventListener('click', saveProjectMemory);
+reloadProjectMemoryBtn.addEventListener('click', loadProjectMemory);
+appendLastTaskMemoryBtn.addEventListener('click', appendLastTaskMemory);
+appendLastTaskMemoryBtn.disabled = true;
 loadLayoutState();
 applyLayoutWidths();
 initResizers();
@@ -2350,6 +2440,7 @@ loadWorkspace();
 loadVersions();
 loadTools();
 loadCommandWhitelist();
+loadProjectMemory();
 // 添加模板生成按钮到新建菜单
 const newItemMenuElement = newItemMenu;
 if (newItemMenuElement) {
