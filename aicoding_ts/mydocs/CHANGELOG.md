@@ -3,6 +3,29 @@
 ## [Unreleased]
 
 ### Added
+- `apps/web/shared.ts`:子页面共享工具(toast / fetchJson / escapeHtml / formatLocalTime)
+- `apps/web/project-memory.html` + `project-memory.ts`:项目知识独立子页(加载/编辑/保存)
+- `apps/web/whitelist.html` + `whitelist.ts`:命令白名单独立子页(添加/删除/列表)
+- `apps/web/snapshots.html` + `snapshots.ts`:版本快照独立子页(创建/列表/回滚)
+- `apps/web/tools.html` + `tools.ts`:工具管理独立子页(测试对话框/调用日志/启用切换)
+- `apps/web/skills.html` + `skills.ts`:Skill 管理独立子页(列表/启用切换/删除/导入对话框)
+- 主页顶栏新增 `topbar-config-nav` 配置入口区,6 个 ghost-button 跳转(MCP / 工具 / Skill / 白名单 / 快照 / 项目知识)
+
+### Changed
+- `apps/web/index.html`:删除 5 块 `version-card` 配置面板(版本快照 / 工具管理 / Skill 管理 / 命令白名单 / 项目知识),删除死位"预览(占位)"块,删除 `skillImportOverlay`
+- `apps/web/index.html`:在结构化摘要末尾保留"💾 把这次任务经验加入项目知识"按钮(任务级 CTA,不属于配置)
+- `apps/web/index.html`:Agent 执行摘要面板改为 `<details>`,默认折叠;`apps/web/styles.css` 增加 `.collapsible-panel/.collapsible-header/.collapsible-indicator` 样式;`apps/web/app.ts` 在 `setTaskPhase` 非 idle/succeeded 阶段、以及 `chatForm submit` 时自动 `logPanel.open = true`
+
+### Fixed
+- `apps/web/styles.css`:`html { scrollbar-gutter: stable }` 永久预留滚动条空间,展开/折叠面板时不再因为滚动条出现/消失导致内容横向抖动;`.app-shell` 内边距从 `24px` 调到 `24px 32px`,主体区两侧多留呼吸感
+- `apps/web/app.ts`:从 ~2950 行瘦到 ~2400 行;删除 `loadVersions/renderVersions/restoreSnapshot/loadTools/renderToolCards/showToolTestDialog/showToolLogsDialog/loadSkills/renderSkillCards/openSkillImportDialog/...` 等 5 块面板的全部代码
+- `apps/web/app.ts`:`createSnapshot()` 简化(创建后用 toast 引导跳子页查看,不再内联 renderVersions);`appendLastTaskMemory()` 保留并改造成跳子页 CTA
+- `apps/web/app.ts`:删除未使用的 `ToolInfo / SkillInfo / SkillImportMode / SkillImportReport` 类型定义;删除 `versionsCache` 等 dead state
+- `apps/web/tsconfig.build.json`:`include` 增加 5 个新 ts 文件 + `shared.ts`
+
+## 2026-06-04
+
+### Added
 - `packages/tool-gateway/patch-matcher.ts`：补丁 fuzzy 匹配与 `@@ line N` 行号锚点
 - `packages/tool-gateway/tool-call-log.ts`、`tool-fallback.ts`
 - `packages/agent-core/tool-definitions.ts`：带示例的详细工具描述
