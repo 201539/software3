@@ -8,13 +8,11 @@ import type {
   UserMessage,
 } from "../shared/types.ts";
 import type { LlmClient } from "../llm-client/index.ts";
-import { createPlanner } from "./planner.ts";
 import { createExecutor } from "./executor.ts";
 import type { ConfirmHook, ExecutorHooks } from "./executor.ts";
 import type { CommandConfirmHook } from "../tool-gateway/run-command.ts";
 import { createReviewer } from "./reviewer.ts";
 import { createSummarizer } from "./summarizer.ts";
-import { createMcpClient } from "./mcp-client.ts";
 import { createExternalMcpRegistry } from "../mcp-client/index.ts";
 import { createTemplateGenerator } from "../template-generator/index.ts";
 import type { TemplateParams } from "../template-generator/types.ts";
@@ -184,16 +182,15 @@ export function createAgentCore(
     await sessionStore.appendMessages(sessionId, loopResult.messages);
 
     onEvent({ type: 'task_status', taskId, status: 'summarizing' });
-
-    const toolResults = loopResult.messages
-      .filter((m) => m.role === 'tool')
-      .map((m) => ({ name: (m as { name: string }).name, result: { ok: true } }));
-
-    const review = reviewer.review({ content: loopResult.finalContent, toolResults });
+    const reviewNotes = [
+      `Review passed: ${loopResult.review.passed}`,
+      ...loopResult.review.issues.map((issue) => `${issue.severity}: ${issue.file} ${issue.description}`),
+      ...loopResult.review.suggestions,
+    ];
     const summaryText = summarizer.summarize({
       plan: { goal: userPrompt, selectedFile },
       execution: { content: loopResult.finalContent },
-      review,
+      review: { summary: loopResult.finalContent, notes: reviewNotes },
     });
     const memorySuggestion = buildProjectMemorySuggestion(
       userPrompt,
