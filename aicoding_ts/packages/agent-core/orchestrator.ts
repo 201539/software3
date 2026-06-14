@@ -1,6 +1,6 @@
-import type { LlmClient } from '../llm-client/index.ts';
+﻿import type { LlmClient } from '../llm-client/index.ts';
 import type { AgentEvent, ChatMessage, ReviewOutput, SubTask, TaskTrace, TaskType } from '../shared/types.ts';
-import type { ConfirmHook, Executor, LoopResult } from './executor.ts';
+import type { ConfirmHook, Executor, ExecutorHooks, LoopResult } from './executor.ts';
 import { runReviewAgent } from './review-agent.ts';
 import { runWorkerPool, type WorkerTask } from './worker-pool.ts';
 
@@ -21,15 +21,47 @@ export type OrchestratorResult = LoopResult & {
   trace: TaskTrace;
 };
 
-const COMPOUND_WORDS = ['同时', '并且', '还要', '顺便', '以及', 'and'];
-const READ_HEAVY_WORDS = ['分析', '解释', '找到所有', '哪里', '流程', '依赖', '安全隐患', 'review'];
+const COMPOUND_WORDS = [
+  'and',
+  'also',
+  'then',
+  '并',
+  '以及',
+  '同时',
+  '然后',
+  '分析',
+  '解释',
+  '总结',
+];
+const READ_HEAVY_WORDS = [
+  'analyze',
+  'explain',
+  'find',
+  'where',
+  'flow',
+  'review',
+  'summarize',
+  '分析',
+  '解释',
+  '总结',
+  '说明',
+  '查找',
+];
 
 function splitSubTasks(prompt: string): SubTask[] {
-  const parts = prompt
-    .split(/同时|并且|还要|顺便|以及| and /i)
+  const normalized = prompt.replace(/[，；。]/g, ',');
+  const connectorParts = normalized
+    .split(/\s+(?:and|also|then)\s+|(?:并|以及|同时|然后)/i)
     .map((part) => part.trim())
     .filter(Boolean)
     .slice(0, 3);
+
+  const actionParts = normalized
+    .split(/[,;]\s*(?:并)?(?=分析|解释|总结|说明|analyze|explain|summarize|review)/i)
+    .map((part) => part.trim())
+    .filter(Boolean)
+    .slice(0, 3);
+  const parts = actionParts.length > connectorParts.length ? actionParts : connectorParts;
 
   return parts.map((description, index) => ({
     id: `subtask-${index + 1}`,
@@ -49,7 +81,8 @@ function extractReadTargets(prompt: string, workspaceFiles: string[]): string[] 
 
 export function classifyTask(prompt: string, workspaceFiles: string[] = []): TaskClassification {
   if (COMPOUND_WORDS.some((word) => prompt.includes(word))) {
-    return { type: 'compound', subTasks: splitSubTasks(prompt) };
+    const subTasks = splitSubTasks(prompt);
+    if (subTasks.length > 1) return { type: 'compound', subTasks };
   }
 
   if (READ_HEAVY_WORDS.some((word) => prompt.includes(word))) {
@@ -109,9 +142,9 @@ export function createOrchestrator(toolGateway: ToolGateway, executor: Executor,
   async function runCodeAgent(
     messages: ChatMessage[],
     onEvent: (event: AgentEvent) => void,
-    onConfirm?: ConfirmHook,
+    hooks?: ConfirmHook | ExecutorHooks,
   ) {
-    return executor.runReActLoop(llmClient, messages, onEvent, onConfirm, { maxIterations: 20 });
+    return executor.runReActLoop(llmClient, messages, onEvent, hooks, { maxIterations: 20 });
   }
 
   return {
@@ -120,7 +153,7 @@ export function createOrchestrator(toolGateway: ToolGateway, executor: Executor,
       originalPrompt: string,
       messages: ChatMessage[],
       onEvent: (event: AgentEvent) => void,
-      onConfirm?: ConfirmHook,
+      hooks?: ConfirmHook | ExecutorHooks,
     ): Promise<OrchestratorResult> {
       const workspaceFiles = toFileList(await toolGateway.listWorkspace());
       const classification = classifyTask(originalPrompt, workspaceFiles);
@@ -144,10 +177,10 @@ export function createOrchestrator(toolGateway: ToolGateway, executor: Executor,
         loopResult = await runCodeAgent([
           ...messages,
           { role: 'user', content: `Use this worker context:\n${context}\n\nTask: ${originalPrompt}` },
-        ], onEvent, onConfirm);
+        ], onEvent, hooks);
       } else if (classification.type === 'compound' && classification.subTasks?.length) {
         let carriedContext = '';
-        const combined: LoopResult = { messages: [], finalContent: '', toolsUsed: [], filesModified: [], fileChanges: [] };
+        const combined: LoopResult = { messages: [], finalContent: '', toolsUsed: [], filesModified: [], fileChanges: [], skillsUsed: [] };
         const prefetch = await prefetchReferencedFiles(toolGateway, originalPrompt, workspaceFiles);
         workerTaskCount = prefetch.workerTaskCount;
         serialDurationMs = prefetch.serialDurationMs;
@@ -159,7 +192,7 @@ export function createOrchestrator(toolGateway: ToolGateway, executor: Executor,
             `Original task: ${originalPrompt}`,
             carriedContext,
           ].filter(Boolean).join('\n\n');
-          const result = await runCodeAgent([...messages, { role: 'user', content: prompt }], onEvent, onConfirm);
+          const result = await runCodeAgent([...messages, { role: 'user', content: prompt }], onEvent, hooks);
           subTask.status = 'done';
           subTask.result = result.finalContent;
           carriedContext = `Previous subtask result:\n${result.finalContent}`;
@@ -167,11 +200,12 @@ export function createOrchestrator(toolGateway: ToolGateway, executor: Executor,
           combined.toolsUsed.push(...result.toolsUsed);
           combined.filesModified.push(...result.filesModified);
           combined.fileChanges.push(...result.fileChanges);
+          combined.skillsUsed.push(...(result.skillsUsed ?? []));
           combined.finalContent = result.finalContent;
         }
         loopResult = combined;
       } else {
-        loopResult = await runCodeAgent(messages, onEvent, onConfirm);
+        loopResult = await runCodeAgent(messages, onEvent, hooks);
       }
 
       const review = await runReviewAgent({

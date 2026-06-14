@@ -1,4 +1,4 @@
-import { createSuccessResponse } from "../shared/index.ts";
+﻿import { createSuccessResponse } from "../shared/index.ts";
 import type {
   AgentEvent,
   ChatMessage,
@@ -9,9 +9,9 @@ import type {
 } from "../shared/types.ts";
 import type { LlmClient } from "../llm-client/index.ts";
 import { createExecutor } from "./executor.ts";
+import { createOrchestrator } from "./orchestrator.ts";
 import type { ConfirmHook, ExecutorHooks } from "./executor.ts";
 import type { CommandConfirmHook } from "../tool-gateway/run-command.ts";
-import { createReviewer } from "./reviewer.ts";
 import { createSummarizer } from "./summarizer.ts";
 import { createExternalMcpRegistry } from "../mcp-client/index.ts";
 import { createTemplateGenerator } from "../template-generator/index.ts";
@@ -65,16 +65,27 @@ function truncateMessages(messages: ChatMessage[], maxCount = 40): ChatMessage[]
   return firstUser > 0 ? tail.slice(firstUser) : tail;
 }
 
+function sanitizeHistoryForNewRun(messages: ChatMessage[]): ChatMessage[] {
+  return messages
+    .filter((message) => message.role !== 'tool')
+    .map((message) => {
+      if (message.role !== 'assistant') return message;
+      if (message.content === null) return null;
+      return { role: 'assistant', content: message.content };
+    })
+    .filter((message): message is ChatMessage => message !== null);
+}
+
 function buildProjectMemorySuggestion(prompt: string, toolsUsed: string[], filesModified: string[]): string {
   const facts: string[] = [];
   if (filesModified.length > 0) {
-    facts.push(`本次任务修改了 ${filesModified.slice(0, 5).join('、')}`);
+    facts.push(`modified files: ${filesModified.slice(0, 5).join(', ')}`);
   }
   if (toolsUsed.length > 0) {
-    facts.push(`使用工具链：${[...new Set(toolsUsed)].slice(0, 5).join('、')}`);
+    facts.push(`tools used: ${[...new Set(toolsUsed)].slice(0, 5).join(', ')}`);
   }
   if (facts.length === 0) return '';
-  return `项目知识建议：如果这是可复用经验，可保存到“Agent 任务经验”：${prompt}；${facts.join('；')}。`;
+  return `Project memory suggestion: if reusable, save this task experience: ${prompt}; ${facts.join('; ')}.`;
 }
 
 function buildSystemPrompt(
@@ -84,8 +95,8 @@ function buildSystemPrompt(
   skillsBlock = '',
 ): string {
   const parts = [
-    '你是一个 AI Coding Agent，负责在工作区中执行编码任务。',
-    '在开始使用普通工具前，必须先检查 Available Skills。若某个 Skill 的 description 与用户任务直接匹配，必须先调用 read_skill；读取后若确认适用，再调用 activate_skill，并按 SKILL.md 执行。只有没有匹配 Skill 时，才直接使用普通工具。',
+    'You are an AI Coding Agent responsible for coding tasks in the workspace.',
+    'Before using normal tools, check Available Skills. If a skill description directly matches the task, call read_skill first, then activate_skill if applicable, and follow SKILL.md. Use normal tools directly only when no skill matches.',
   ];
 
   if (skillsBlock.trim()) {
@@ -93,35 +104,34 @@ function buildSystemPrompt(
   }
 
   parts.push(
-    '优先使用工具完成文件读取、写入和命令执行，不要编造工具执行结果。',
-    '如果是修改已有文件，优先使用 patch_file 做局部修改；只有新建文件、整文件重写或 patch 失败时才使用 write_file。',
-    '如需先定位目标，可先调用 search_in_workspace。',
-    '如果存在外部 MCP 工具，可按工具名直接调用，它们通常以 mcp__服务名__工具名 的形式出现。',
-    '当任务完成时，用简洁中文总结执行结果。',
-    '如需用户确认某个破坏性操作或存在不确定的决策，调用 ask_user 工具提出问题。',
-    'run_command 对非白名单命令会自动弹出确认；静态检查优先使用 read_lints；查看文件历史变更使用 diff_file。',
+    'Use tools for file reads, writes, and commands. Do not fabricate tool results.',
+    'For existing files, prefer patch_file. Use write_file only for new files, full rewrites, or failed patches.',
+    'Use search_in_workspace when you need to locate a target first.',
+    'External MCP tools may be called by their mcp__server__tool names when available.',
+    'When the task is done, summarize results in concise Chinese.',
+    'Use ask_user only for destructive actions or uncertain decisions.',
+    'run_command may request confirmation for non-whitelisted commands; prefer read_lints for static checks and diff_file for file history.',
     '',
-    `## 工作区概况`,
-    context.workspaceSummary || '（工作区为空）',
+    '## Workspace Summary',
+    context.workspaceSummary || '(empty workspace)',
   );
 
   const retrievedMemory = context.projectMemorySummary?.trim() || projectMemory.trim();
   if (retrievedMemory) {
-    parts.push('', '## 项目记忆（按当前任务检索）', retrievedMemory);
+    parts.push('', '## Project Memory', retrievedMemory);
   }
 
   const recentSummaries = taskSummaries.slice(-5);
   if (recentSummaries.length > 0) {
-    parts.push('', '## 近期任务历史');
+    parts.push('', '## Recent Tasks');
     for (const s of recentSummaries) {
       const date = s.startedAt.slice(0, 10);
-      parts.push(`- [${date}] ${s.prompt}：${s.summary}`);
+      parts.push(`- [${date}] ${s.prompt}: ${s.summary}`);
     }
   }
 
   return parts.join('\n');
 }
-
 function buildSkillsBlock(skillRegistry: SkillRegistry | undefined, prompt: string): string {
   if (!skillRegistry) return '';
   const skillSummaries = skillRegistry.listImplicitCandidates();
@@ -138,11 +148,11 @@ export function createAgentCore(
   skillRegistry?: SkillRegistry,
 ) {
   const executor = createExecutor(toolGateway, externalMcpRegistry, skillRegistry);
-  const reviewer = createReviewer();
+  const orchestrator = createOrchestrator(toolGateway, executor, llmClient);
   const summarizer = createSummarizer();
   const templateGenerator = createTemplateGenerator();
 
-  // ── 主任务入口（有会话管理）──
+  // 鈹€鈹€ 涓讳换鍔″叆鍙ｏ紙鏈変細璇濈鐞嗭級鈹€鈹€
   async function runTask(
     sessionId: string,
     userPrompt: string,
@@ -173,11 +183,12 @@ export function createAgentCore(
 
     await sessionStore.appendMessages(sessionId, [userMsg]);
 
-    const llmMessages: ChatMessage[] = [systemMsg, ...truncateMessages(session.messages), userMsg];
+    const history = truncateMessages(sanitizeHistoryForNewRun(session.messages));
+    const llmMessages: ChatMessage[] = [systemMsg, ...history, userMsg];
 
     onEvent({ type: 'task_status', taskId, status: 'executing' });
 
-    const loopResult = await executor.runReActLoop(llmClient, llmMessages, onEvent, hooks);
+    const loopResult = await orchestrator.run(taskId, userPrompt, llmMessages, onEvent, hooks);
 
     await sessionStore.appendMessages(sessionId, loopResult.messages);
 
@@ -208,6 +219,7 @@ export function createAgentCore(
       toolsUsed: loopResult.toolsUsed,
       filesModified: loopResult.filesModified,
       skillsUsed: loopResult.skillsUsed,
+      trace: loopResult.trace,
     };
 
     await sessionStore.appendTaskSummary(sessionId, taskSummary);
@@ -218,7 +230,7 @@ export function createAgentCore(
     return taskSummary;
   }
 
-  // ── 向后兼容的 preview()（无会话管理）──
+  // 鈹€鈹€ 鍚戝悗鍏煎鐨?preview()锛堟棤浼氳瘽绠＄悊锛夆攢鈹€
   async function preview(
     prompt: string,
     selectedFile: string | null = null,
@@ -228,7 +240,7 @@ export function createAgentCore(
     const skillsBlock = buildSkillsBlock(skillRegistry, prompt);
 
     if (llmClient.model === 'mock') {
-      const fallback = '理解需求；构建上下文；生成/修改文件；执行命令验证；回显结果。';
+      const fallback = 'Understood request; built context; generated or edited files; ran verification; returned result.';
       if (onChunk) onChunk(fallback);
       return createSuccessResponse({ status: 'mocked', output: fallback, context });
     }
@@ -278,7 +290,7 @@ export function createAgentCore(
           onChunk({
             type: "tool",
             tool: "write_file",
-            summary: `创建文件: ${file.path}`,
+            summary: `Created file: ${file.path}`,
           });
         }
       }

@@ -98,6 +98,15 @@ function sendJson(res: ServerResponse, statusCode: number, data: unknown) {
   res.end(JSON.stringify(data, null, 2));
 }
 
+class HttpError extends Error {
+  status: number;
+  constructor(status: number, message: string) {
+    super(message);
+    this.name = 'HttpError';
+    this.status = status;
+  }
+}
+
 async function parseBody<T>(req: IncomingMessage): Promise<T> {
   let body = '';
   await new Promise<void>((resolve, reject) => {
@@ -107,7 +116,12 @@ async function parseBody<T>(req: IncomingMessage): Promise<T> {
     req.on("end", () => resolve());
     req.on("error", (error) => reject(error));
   });
-  return (body ? JSON.parse(body) : {}) as T;
+  if (!body) return {} as T;
+  try {
+    return JSON.parse(body) as T;
+  } catch {
+    throw new HttpError(400, '请求体不是合法的 JSON');
+  }
 }
 
 // ── 挂起确认表（内存）──
@@ -254,6 +268,7 @@ export function startRuntimeServer() {
   const server = createServer(async (req: IncomingMessage, res: ServerResponse) => {
     const url = new URL(req.url || '/', `http://${req.headers.host}`);
 
+    try {
     if (url.pathname === '/api/external-mcp/tools' && req.method === 'GET') {
       try {
         sendJson(res, 200, { tools: await externalMcpRegistry.listTools() });
@@ -1019,6 +1034,16 @@ export function startRuntimeServer() {
 
     res.writeHead(404, { "Content-Type": "text/plain; charset=utf-8" });
     res.end("Not Found");
+    } catch (err) {
+      const status = err instanceof HttpError ? err.status : 500;
+      const message = err instanceof Error ? err.message : String(err);
+      console.error(`[request error] ${req.method} ${url.pathname}:`, message);
+      if (!res.headersSent) {
+        sendJson(res, status, { error: message });
+      } else {
+        res.end();
+      }
+    }
   });
 
   server.listen(port, () => {

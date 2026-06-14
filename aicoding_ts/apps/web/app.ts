@@ -1816,6 +1816,7 @@ async function streamChat(prompt: string) {
           | { type: 'result'; result: PreviewResult }
           | { type: 'error'; message: string }
           | { type: 'session'; sessionId: string }
+          | { type: 'plan'; taskId: string; steps: string[] }
           | { type: 'task_status'; taskId: string; status: string }
           | { type: 'confirm_request'; confirmId: string; question: string; options?: string[] }
           | {
@@ -1843,6 +1844,8 @@ async function streamChat(prompt: string) {
             sawWriteFileSuccess = true;
             scheduleWorkspaceRefresh(300);
           }
+        } else if (event.type === 'plan') {
+          appendToolDetail('multi-agent', `Agent plan\n\n${event.steps.map((step) => `- ${step}`).join('\n')}`);
         } else if (event.type === 'skill') {
           appendSkillEvent(event);
         } else if (event.type === 'result') {

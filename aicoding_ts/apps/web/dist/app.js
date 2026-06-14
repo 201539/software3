@@ -1667,6 +1667,9 @@ async function streamChat(prompt) {
                         scheduleWorkspaceRefresh(300);
                     }
                 }
+                else if (event.type === 'plan') {
+                    appendToolDetail('multi-agent', `Agent plan\n\n${event.steps.map((step) => `- ${step}`).join('\n')}`);
+                }
                 else if (event.type === 'skill') {
                     appendSkillEvent(event);
                 }

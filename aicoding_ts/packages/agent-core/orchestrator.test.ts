@@ -24,6 +24,17 @@ test('classifies analysis prompts as read-heavy with read targets', () => {
   assert.deepEqual(result.readTargets, ['src/auth.ts', 'src/routes/user.ts']);
 });
 
+test('classifies Chinese multi-file analysis prompts as compound', () => {
+  const result = classifyTask('分析hotwords.py，解释sensevoice.py，并总结builder.py', [
+    'stt/hotwords.py',
+    'stt/sensevoice.py',
+    'kb/builder.py',
+  ]);
+
+  assert.equal(result.type, 'compound');
+  assert.equal(result.subTasks?.length, 3);
+});
+
 test('classifies focused edit prompts as code-only', () => {
   const result = classifyTask('Change validateToken in auth.ts to async', ['src/auth.ts']);
 
