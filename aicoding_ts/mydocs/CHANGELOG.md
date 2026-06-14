@@ -17,6 +17,9 @@
 - `apps/web/index.html`:Agent 执行摘要面板改为 `<details>`,默认折叠;`apps/web/styles.css` 增加 `.collapsible-panel/.collapsible-header/.collapsible-indicator` 样式;`apps/web/app.ts` 在 `setTaskPhase` 非 idle/succeeded 阶段、以及 `chatForm submit` 时自动 `logPanel.open = true`
 
 ### Fixed
+- `apps/runtime/server.ts`:修复 `tsc --noEmit` 下 `ServerResponse.headersSent` 类型报错,改经 `OutgoingMessage` 访问;CI typecheck 恢复通过
+- `packages/agent-core/index.ts`:重写 `sanitizeHistoryForNewRun`,消除 `ChatMessage[]` 类型收窄错误
+- `.github/workflows/aicoding-ts.yml`:设置 `FORCE_JAVASCRIPT_ACTIONS_TO_NODE24=true`,消除 Node.js 20 actions 弃用警告
 - `apps/runtime/server.ts`:修复任意接口收到非法 JSON 请求体时整个 Node 进程崩溃的问题。`parseBody` 不再让 `JSON.parse` 抛出未捕获异常(改抛 `HttpError(400)`),并在整个请求处理器外层加 try/catch 兜底,任何路由抛错都返回 4xx/5xx 而非让进程退出。此前进程一旦崩溃,前端所有按钮(含"加载工作区")都无响应、会话徽标卡在"会话加载中…"
 - `apps/web/styles.css`:`html { scrollbar-gutter: stable }` 永久预留滚动条空间,展开/折叠面板时不再因为滚动条出现/消失导致内容横向抖动;`.app-shell` 内边距从 `24px` 调到 `24px 32px`,主体区两侧多留呼吸感
 - `apps/web/app.ts`:从 ~2950 行瘦到 ~2400 行;删除 `loadVersions/renderVersions/restoreSnapshot/loadTools/renderToolCards/showToolTestDialog/showToolLogsDialog/loadSkills/renderSkillCards/openSkillImportDialog/...` 等 5 块面板的全部代码

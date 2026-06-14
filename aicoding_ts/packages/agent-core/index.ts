@@ -66,14 +66,13 @@ function truncateMessages(messages: ChatMessage[], maxCount = 40): ChatMessage[]
 }
 
 function sanitizeHistoryForNewRun(messages: ChatMessage[]): ChatMessage[] {
-  return messages
-    .filter((message) => message.role !== 'tool')
-    .map((message) => {
-      if (message.role !== 'assistant') return message;
-      if (message.content === null) return null;
-      return { role: 'assistant', content: message.content };
-    })
-    .filter((message): message is ChatMessage => message !== null);
+  const sanitized: ChatMessage[] = [];
+  for (const message of messages) {
+    if (message.role === 'tool') continue;
+    if (message.role === 'assistant' && message.content === null) continue;
+    sanitized.push(message);
+  }
+  return sanitized;
 }
 
 function buildProjectMemorySuggestion(prompt: string, toolsUsed: string[], filesModified: string[]): string {

@@ -1038,7 +1038,7 @@ export function startRuntimeServer() {
       const status = err instanceof HttpError ? err.status : 500;
       const message = err instanceof Error ? err.message : String(err);
       console.error(`[request error] ${req.method} ${url.pathname}:`, message);
-      if (!res.headersSent) {
+      if (!(res as ServerResponse & { headersSent: boolean }).headersSent) {
         sendJson(res, status, { error: message });
       } else {
         res.end();
