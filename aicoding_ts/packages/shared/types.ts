@@ -45,63 +45,7 @@ export type TaskSummary = {
   summary: string;
   toolsUsed: string[];
   filesModified: string[];
-  trace?: TaskTrace;
-};
-
-export type TaskType = 'read-heavy' | 'code-only' | 'compound';
-
-export type FileDiff = {
-  path: string;
-  before: string | null;
-  after: string | null;
-};
-
-export type SubTask = {
-  id: string;
-  description: string;
-  dependsOn?: string[];
-  assignedTo: 'code-agent' | 'worker-pool';
-  status: 'pending' | 'running' | 'done' | 'failed';
-  result?: string;
-};
-
-export type AgentMessage = {
-  from: 'orchestrator' | 'worker' | 'code-agent' | 'review-agent';
-  to: 'orchestrator' | 'worker' | 'code-agent' | 'review-agent';
-  taskId: string;
-  subTaskId?: string;
-  payload: {
-    prompt?: string;
-    context?: string;
-    result?: string;
-    fileChanges?: FileDiff[];
-  };
-  timestamp: number;
-};
-
-export type ReviewIssue = {
-  severity: 'error' | 'warning' | 'suggestion';
-  file: string;
-  description: string;
-};
-
-export type ReviewOutput = {
-  passed: boolean;
-  issues: ReviewIssue[];
-  suggestions: string[];
-  retryInstruction?: string;
-};
-
-export type TaskTrace = {
-  taskId: string;
-  classifiedAs: TaskType;
-  workerTaskCount: number;
-  workerParallelDurationMs: number;
-  serialDurationMs: number;
-  codeAgentIterations: number;
-  reviewPassed: boolean;
-  reviewRetries: number;
-  subTaskCount: number;
+  skillsUsed?: string[];
 };
 
 // ── 会话对象 ──
@@ -131,6 +75,17 @@ export type ToolInfo = {
   successCount: number;
   avgDurationMs: number;
   lastCalledAt: string | null;
+};
+
+export type ToolCallLogEntry = {
+  id: string;
+  toolName: string;
+  argsPreview: string;
+  ok: boolean;
+  durationMs: number;
+  at: string;
+  resultPreview: string;
+  error?: string;
 };
 
 // ── SSE 事件类型（向后兼容原有 chunk/tool/result/error，新增以下类型）──
@@ -163,12 +118,24 @@ export type PlanEvent = {
   steps: string[];
 };
 
+export type CommandRisk = 'low' | 'medium' | 'high';
+
 export type ConfirmRequestEvent = {
   type: 'confirm_request';
   taskId: string;
   confirmId: string;
   question: string;
   options?: string[];
+};
+
+export type CommandConfirmRequestEvent = {
+  type: 'command_confirm_request';
+  taskId: string;
+  confirmId: string;
+  command: string;
+  cwd: string;
+  risk: CommandRisk;
+  reason: string;
 };
 
 export type ConfirmResolvedEvent = {
@@ -190,6 +157,15 @@ export type SessionEvent = {
   isNew: boolean;
 };
 
+export type SkillEvent = {
+  type: 'skill';
+  skill: string;
+  action: 'listed' | 'read' | 'activated' | 'deactivated';
+  trigger?: 'implicit' | 'explicit';
+  reason?: string;
+  summary?: string;
+};
+
 export type AgentEvent =
   | ChunkEvent
   | ToolEvent
@@ -197,9 +173,11 @@ export type AgentEvent =
   | ErrorEvent
   | PlanEvent
   | ConfirmRequestEvent
+  | CommandConfirmRequestEvent
   | ConfirmResolvedEvent
   | TaskStatusEvent
-  | SessionEvent;
+  | SessionEvent
+  | SkillEvent;
 
 // ── 挂起确认（服务端内存中维护）──
 
@@ -211,5 +189,18 @@ export type PendingConfirm = {
   options?: string[];
   createdAt: number;
   resolve: (answer: string) => void;
+  reject: (reason: Error) => void;
+};
+
+export type PendingCommandConfirm = {
+  confirmId: string;
+  taskId: string;
+  sessionId: string;
+  command: string;
+  cwd: string;
+  risk: CommandRisk;
+  reason: string;
+  createdAt: number;
+  resolve: (decision: 'allow_once' | 'allow_whitelist' | 'deny') => void;
   reject: (reason: Error) => void;
 };

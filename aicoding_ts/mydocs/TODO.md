@@ -1,15 +1,43 @@
 # TODO
 
+## 已完成(主页拆分 2026-06-11)
+
+- [x] **主页拆分:配置面板独立成 5 个子页**(2026-06-11)
+  - 主页 `index.html` 移除 版本快照 / 工具管理 / Skill / 白名单 / 项目知识 5 块 + 死位预览块
+  - 新建 5 个独立页:`/project-memory.html` `/whitelist.html` `/snapshots.html` `/tools.html` `/skills.html`
+  - 顶栏 `topbar-right` 新增 6 个跳转按钮(含原 MCP 配置)
+  - `apps/web/shared.ts` 提供子页共享工具(toast / fetchJson / escapeHtml / formatLocalTime)
+  - 主页保留:编辑器顶栏"创建快照"按钮、结构化摘要末尾"💾 把这次任务经验加入项目知识"按钮、命令确认弹窗
+  - `app.ts` 从 ~2950 行瘦到 ~2400 行
+  - `tsconfig.build.json` include 增加新文件
+  - 编译通过,Playwright 验证 6 个页面 console 0 错误
+
 ## 进行中
 
 （无）
 
 ## 待做
 
+- [ ] **工具链后续（可选）**：MCP 配置并入工具管理 Tab、外部工具禁用、工具日志持久化到磁盘
+
 - [ ] **上下文管理优化**：将当前的"截断"改为真正的"压缩"
   - 现状：`truncateMessages(messages, 40)` 只是把旧消息从头切掉，信息直接丢失
   - 目标：新任务组装 `llmMessages` 时只传任务摘要（`taskSummaries`），不传原始历史消息；原始消息仅在任务内部 ReAct loop 中使用，任务结束后不再累积传递
   - 相关文件：`packages/agent-core/index.ts` `truncateMessages(session.messages)` 调用
+
+## 已完成（迭代三 工具链 2026-06-04）
+
+- [x] **工具链二期：patch/日志/降级/UI**（2026-06-04）
+  - `patch-matcher.ts` fuzzy 匹配 + `@@ line N` 行号锚点
+  - `tool-call-log.ts` + `GET /api/tools/:name/logs`
+  - `tool-fallback.ts` 失败降级提示；executor 过滤已禁用工具
+  - `tool-definitions.ts` 工具描述优化；UI 测试/日志、diff_file 对话内格式化
+
+- [x] **工具链：run_command 安全确认 + 白名单**（2026-06-04）
+  - `command-safety.ts` / `command-whitelist-store.ts` / `run-command.ts`
+  - SSE `command_confirm_request` + `POST /api/agent/command-confirm`
+  - 新增工具 `read_lints`、`diff_file`
+  - Web：命令确认弹窗 + 白名单 CRUD 面板
 
 ## 已完成（新周期 2026-04-27）
 

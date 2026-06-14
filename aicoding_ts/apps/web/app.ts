@@ -7,8 +7,6 @@ const currentFile = document.querySelector<HTMLElement>('#currentFile')!;
 const editorSaveBadge = document.querySelector<HTMLElement>('#editorSaveBadge')!;
 const summary = document.querySelector<HTMLElement>('#summary')!;
 const snapshotBtn = document.querySelector<HTMLButtonElement>('#snapshotBtn')!;
-const versionList = document.querySelector<HTMLElement>('#versionList')!;
-const versionStatus = document.querySelector<HTMLElement>('#versionStatus')!;
 const taskStatusSteps = document.querySelector<HTMLElement>('#taskStatusSteps')!;
 const retryLastTaskBtn = document.querySelector<HTMLButtonElement>('#retryLastTaskBtn')!;
 const waitingUserPanel = document.querySelector<HTMLElement>('#waitingUserPanel')!;
@@ -21,7 +19,13 @@ const failureDetail = document.querySelector<HTMLElement>('#failureDetail')!;
 const clearFailureBtn = document.querySelector<HTMLButtonElement>('#clearFailureBtn')!;
 const statusTimeline = document.querySelector<HTMLElement>('#statusTimeline')!;
 const commandConfirmOverlay = document.querySelector<HTMLElement>('#commandConfirmOverlay')!;
-const commandConfirmCloseBtn = document.querySelector<HTMLButtonElement>('#commandConfirmCloseBtn')!;
+const commandConfirmReason = document.querySelector<HTMLElement>('#commandConfirmReason')!;
+const commandConfirmRisk = document.querySelector<HTMLElement>('#commandConfirmRisk')!;
+const commandConfirmCwd = document.querySelector<HTMLElement>('#commandConfirmCwd')!;
+const commandConfirmText = document.querySelector<HTMLElement>('#commandConfirmText')!;
+const commandConfirmDenyBtn = document.querySelector<HTMLButtonElement>('#commandConfirmDenyBtn')!;
+const commandConfirmOnceBtn = document.querySelector<HTMLButtonElement>('#commandConfirmOnceBtn')!;
+const commandConfirmWhitelistBtn = document.querySelector<HTMLButtonElement>('#commandConfirmWhitelistBtn')!;
 const refreshBtn = document.querySelector<HTMLButtonElement>('#refreshBtn')!;
 const workspaceLayout = document.querySelector<HTMLElement>('#workspaceLayout')!;
 const newItemBtn = document.querySelector<HTMLButtonElement>('#newItemBtn')!;
@@ -32,7 +36,8 @@ const agentStatusBadge = document.querySelector<HTMLElement>('#agentStatusBadge'
 const newSessionBtn = document.querySelector<HTMLButtonElement>('#newSessionBtn')!;
 const workspacePathInput = document.querySelector<HTMLInputElement>('#workspacePathInput')!;
 const workspaceSuggestList = document.querySelector<HTMLUListElement>('#workspaceSuggestList')!;
-const loadWorkspaceBtn = document.querySelector<HTMLButtonElement>('#loadWorkspaceBtn')!;;
+const loadWorkspaceBtn = document.querySelector<HTMLButtonElement>('#loadWorkspaceBtn')!;
+const appendLastTaskMemoryBtn = document.querySelector<HTMLButtonElement>('#appendLastTaskMemoryBtn')!;
 
 type WorkspaceNode = {
   id: string;
@@ -50,24 +55,26 @@ type ToolEvent = {
   detail?: string;
 };
 
+type SkillEvent = {
+  type: 'skill';
+  skill: string;
+  action: 'listed' | 'read' | 'activated' | 'deactivated';
+  trigger?: 'implicit' | 'explicit';
+  reason?: string;
+  summary?: string;
+};
+
 type PreviewResult = {
+  taskId?: string;
+  prompt?: string;
   output?: string;
   toolResults?: Array<{ name: string; result?: { ok?: boolean; file?: unknown } }>;
   data?: { toolResults?: Array<{ name: string; result?: { ok?: boolean; file?: unknown } }> };
   summary?: string;
+  toolsUsed?: string[];
+  filesModified?: string[];
   changedFiles?: string[];
   commands?: Array<{ command: string; exitCode?: number; cwd?: string }>;
-};
-
-type ToolInfo = {
-  name: string;
-  description: string;
-  source: 'local' | 'external';
-  enabled: boolean;
-  callCount: number;
-  successCount: number;
-  avgDurationMs: number;
-  lastCalledAt: string | null;
 };
 
 type VersionSnapshot = {
@@ -98,7 +105,6 @@ type UiTaskPhase =
 let selectedFile: string | null = null;
 let currentFileContent = '';
 let workspaceCache: WorkspaceNode[] = [];
-let versionsCache: VersionSnapshot[] = [];
 let currentAutoRefreshTimer: ReturnType<typeof setTimeout> | null = null;
 let editorSaveTimer: ReturnType<typeof setTimeout> | null = null;
 let expandedFolders = new Set<string>();
@@ -110,11 +116,19 @@ let lastUserPrompt: string | null = null;
 let lastTaskPhase: UiTaskPhase = 'idle';
 let lastTaskPhaseUpdatedAt = 0;
 let lastConfirmRequest: { confirmId: string; question: string; options?: string[] } | null = null;
+let lastCommandConfirmRequest: {
+  confirmId: string;
+  command: string;
+  cwd: string;
+  risk: string;
+  reason: string;
+} | null = null;
 let showRawSummary = false;
 let lastFailureText: string | null = null;
 let statusHistory: Array<{ at: number; phase: UiTaskPhase; detail?: string }> = [];
 let lastRunCommandDetail: string | null = null;
 let shouldScrollTreeToActive = false;
+let lastProjectMemoryEntry: string | null = null;
 
 const layoutState = {
   chat: 34,
@@ -462,6 +476,22 @@ function normalizeToolResults(result: PreviewResult | null): Array<{ name: strin
   }));
 }
 
+function buildProjectMemoryEntry(result: PreviewResult | null, changedFiles: string[]): string | null {
+  if (!result) return null;
+  const prompt = result.prompt?.trim() || lastUserPrompt?.trim();
+  const summaryText = result.summary?.trim() || result.output?.trim();
+  if (!prompt && !summaryText && changedFiles.length === 0) return null;
+
+  const parts = [
+    prompt ? `任务：${prompt}` : '',
+    summaryText ? `经验：${summaryText.replace(/\s+/g, ' ').slice(0, 260)}` : '',
+    changedFiles.length > 0 ? `相关文件：${changedFiles.slice(0, 5).join('、')}` : '',
+    result.toolsUsed?.length ? `工具：${[...new Set(result.toolsUsed)].slice(0, 5).join('、')}` : '',
+  ].filter(Boolean);
+
+  return parts.join('；');
+}
+
 function renderStructuredSummary(result: PreviewResult | null) {
   const toolResults = normalizeToolResults(result);
 
@@ -531,6 +561,8 @@ function renderStructuredSummary(result: PreviewResult | null) {
 
   if (!result) {
     mkRow('状态', mkValue('暂无摘要（等待任务运行）。'));
+    lastProjectMemoryEntry = null;
+    appendLastTaskMemoryBtn.disabled = true;
     return;
   }
 
@@ -561,6 +593,9 @@ function renderStructuredSummary(result: PreviewResult | null) {
       .join(' / ');
     mkRow('工具调用', mkValue(brief));
   }
+
+  lastProjectMemoryEntry = buildProjectMemoryEntry(result, [...changedFiles]);
+  appendLastTaskMemoryBtn.disabled = !lastProjectMemoryEntry;
 }
 
 // ── 工作区历史记录 ──
@@ -697,7 +732,6 @@ loadWorkspaceBtn.addEventListener('click', async () => {
     saveWorkspaceHistory(path);
     workspaceCache = data.tree ?? [];
     renderTree(workspaceCache);
-    await loadVersions();
 
     if (data.sessionId) {
       currentSessionId = data.sessionId;
@@ -750,10 +784,43 @@ function renderMarkdown(text: string): string {
 const TOOL_COLORS: Record<string, string> = {
   write_file: 'var(--accent-2)',
   read_file: 'var(--muted)',
+  patch_file: '#a78bfa',
+  search_in_workspace: '#94a3b8',
   run_command: '#f59e0b',
+  read_lints: '#34d399',
+  diff_file: '#38bdf8',
   ask_user: '#facc15',
   list_workspace: 'var(--muted)',
 };
+
+const skillCallCards = new Map<string, HTMLElement>();
+
+function formatToolDetailForChat(toolName: string, rawDetail: string): string {
+  if (toolName !== 'diff_file') return rawDetail;
+  try {
+    const data = JSON.parse(rawDetail) as {
+      path?: string;
+      snapshotName?: string;
+      stats?: { added: number; removed: number; unchanged: number };
+      hunks?: Array<{ type: string; line: string; oldLineNo?: number; newLineNo?: number }>;
+    };
+    const lines: string[] = [
+      `文件：${data.path ?? '?'}`,
+      `对比快照：${data.snapshotName ?? '最新'}`,
+      `变更：+${data.stats?.added ?? 0} / -${data.stats?.removed ?? 0}`,
+      '',
+    ];
+    for (const h of (data.hunks ?? []).slice(0, 80)) {
+      const prefix = h.type === 'add' ? '+' : h.type === 'remove' ? '-' : ' ';
+      const no = h.newLineNo ?? h.oldLineNo ?? '';
+      lines.push(`${prefix} ${String(no).padStart(4)} | ${h.line}`);
+    }
+    if ((data.hunks?.length ?? 0) > 80) lines.push('…（仅显示前 80 行）');
+    return lines.join('\n');
+  } catch {
+    return rawDetail;
+  }
+}
 
 function appendMessage(role: string, text: string) {
   const div = document.createElement('div');
@@ -762,6 +829,44 @@ function appendMessage(role: string, text: string) {
   chatLog.appendChild(div);
   chatLog.scrollTop = chatLog.scrollHeight;
   return div;
+}
+
+function appendSkillEvent(event: SkillEvent) {
+  if (event.action === 'listed') return;
+
+  let node = skillCallCards.get(event.skill);
+  if (!node) {
+    node = document.createElement('div');
+    node.className = 'skill-call';
+
+    const header = document.createElement('div');
+    header.className = 'skill-call-header';
+
+    const badge = document.createElement('span');
+    badge.className = 'skill-call-badge';
+    badge.textContent = 'Skill';
+
+    const title = document.createElement('span');
+    title.className = 'skill-call-title';
+    title.textContent = `${event.action === 'read' ? '加载' : '启用'} Skill：${event.skill}`;
+
+    const detail = document.createElement('div');
+    detail.className = 'skill-call-reason';
+    detail.textContent = event.summary || '已处理该 Skill。';
+
+    header.appendChild(badge);
+    header.appendChild(title);
+    node.appendChild(header);
+    node.appendChild(detail);
+    skillCallCards.set(event.skill, node);
+    chatLog.appendChild(node);
+  }
+
+  const detail = node.querySelector<HTMLElement>('.skill-call-reason');
+  if (detail) {
+    detail.textContent = event.reason || event.summary || '已处理该 Skill。';
+  }
+  chatLog.scrollTop = chatLog.scrollHeight;
 }
 
 function renderConfirmCard(event: { confirmId: string; question: string; options?: string[] }) {
@@ -1307,57 +1412,6 @@ function scheduleWorkspaceRefresh(delayMs = 0) {
   }, delayMs);
 }
 
-function renderVersions(versions: VersionSnapshot[]) {
-  versionsCache = versions;
-  versionStatus.textContent = `${versions.length} 个版本`;
-  versionList.innerHTML = '';
-
-  if (versions.length === 0) {
-    const empty = document.createElement('div');
-    empty.className = 'version-empty';
-    empty.textContent = '还没有快照。创建一个快照后，就可以在这里查看和回滚版本。';
-    versionList.appendChild(empty);
-    return;
-  }
-
-  versions.forEach((version) => {
-    const item = document.createElement('article');
-    item.className = 'version-item';
-    item.innerHTML = `
-      <div class="version-item-header">
-        <div>
-          <div class="version-item-title"></div>
-          <div class="version-item-id"></div>
-        </div>
-      </div>
-      <div class="version-item-description"></div>
-      <div class="version-item-meta"></div>
-      <div class="version-item-actions">
-        <button type="button" class="version-restore-btn">回滚到此版本</button>
-      </div>
-    `;
-    item.querySelector<HTMLElement>('.version-item-title')!.textContent = version.name;
-    item.querySelector<HTMLElement>('.version-item-id')!.textContent = version.id;
-    item.querySelector<HTMLElement>('.version-item-description')!.textContent = version.description || '无描述';
-    item.querySelector<HTMLElement>('.version-item-meta')!.textContent = `创建时间：${formatVersionTime(version.createdAt)}`;
-    item.querySelector<HTMLButtonElement>('.version-restore-btn')!.addEventListener('click', () => {
-      restoreSnapshot(version.id);
-    });
-    versionList.appendChild(item);
-  });
-}
-
-async function loadVersions() {
-  try {
-    const res = await fetch('/api/versions');
-    const data = await res.json() as { versions?: VersionSnapshot[] };
-    renderVersions(data.versions || []);
-  } catch {
-    versionStatus.textContent = '加载失败';
-    versionList.innerHTML = '<div class="version-empty">版本列表加载失败，请稍后重试。</div>';
-  }
-}
-
 async function syncSelectedFileAfterWorkspaceChange() {
   if (!selectedFile) return;
   const exists = findNodeByPath(workspaceCache, selectedFile);
@@ -1391,51 +1445,20 @@ async function createSnapshot() {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(input),
     });
-    const data = await res.json() as { ok?: boolean; error?: string; snapshot?: VersionSnapshot; versions?: VersionSnapshot[] };
+    const data = await res.json() as { ok?: boolean; error?: string; snapshot?: VersionSnapshot };
     if (!res.ok || data.ok === false) throw new Error(data.error || '创建快照失败');
-    renderVersions(data.versions || []);
-    showToast({ kind: 'info', title: '已创建快照', message: data.snapshot?.id ?? '快照已保存' });
+    showToast({
+      kind: 'info',
+      title: '已创建快照',
+      message: data.snapshot?.id ?? '快照已保存',
+      actionLabel: '查看快照',
+      onAction: () => { window.location.href = '/snapshots.html'; },
+    });
   } catch (error) {
     showToast({ kind: 'error', title: '创建快照失败', message: (error as Error).message });
   } finally {
     snapshotBtn.disabled = false;
     snapshotBtn.textContent = '创建快照';
-  }
-}
-
-async function restoreSnapshot(snapshotId: string) {
-  cancelPendingEditorSave();
-  const target = versionsCache.find((item) => item.id === snapshotId);
-  const confirmed = await showConfirmDialog({
-    title: '回滚确认',
-    message: `确定回滚到 ${target?.name || snapshotId} 吗？当前工作区会被覆盖。`,
-    confirmLabel: '回滚',
-    danger: true,
-  });
-  if (!confirmed) return;
-
-  try {
-    const res = await fetch('/api/version/restore', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ snapshotId }),
-    });
-    const data = await res.json() as {
-      ok?: boolean;
-      error?: string;
-      tree?: WorkspaceNode[];
-      versions?: VersionSnapshot[];
-      restoredVersion?: VersionSnapshot;
-    };
-    if (!res.ok || data.ok === false) throw new Error(data.error || '回滚失败');
-    workspaceCache = data.tree || [];
-    renderTree(workspaceCache);
-    renderVersions(data.versions || []);
-    await syncSelectedFileAfterWorkspaceChange();
-    summary.textContent = JSON.stringify(data.restoredVersion ?? data, null, 2);
-    showToast({ kind: 'info', title: '已回滚', message: `已回滚到快照 ${snapshotId}` });
-  } catch (error) {
-    showToast({ kind: 'error', title: '回滚失败', message: (error as Error).message });
   }
 }
 
@@ -1695,6 +1718,7 @@ async function streamGenerateScaffold(projectName: string, templateId: string) {
 }
 
 async function streamChat(prompt: string) {
+  skillCallCards.clear();
   const response = await fetch('/api/agent/chat', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
@@ -1787,25 +1811,40 @@ async function streamChat(prompt: string) {
       try {
         const event = JSON.parse(payload) as
           | ToolEvent
+          | SkillEvent
           | { type: 'chunk'; chunk: string }
           | { type: 'result'; result: PreviewResult }
           | { type: 'error'; message: string }
           | { type: 'session'; sessionId: string }
           | { type: 'task_status'; taskId: string; status: string }
-          | { type: 'confirm_request'; confirmId: string; question: string; options?: string[] };
+          | { type: 'confirm_request'; confirmId: string; question: string; options?: string[] }
+          | {
+              type: 'command_confirm_request';
+              confirmId: string;
+              command: string;
+              cwd: string;
+              risk: string;
+              reason: string;
+            };
 
         if (event.type === 'chunk') {
           accumulatedChunks += event.chunk;
           updateAssistant(accumulatedChunks);
         } else if (event.type === 'tool') {
-          appendToolDetail(event.tool, `${event.summary || '工具调用结果'}\n\n${event.detail || ''}`);
+          const detailBody = formatToolDetailForChat(
+            event.tool,
+            event.detail || '',
+          );
+          appendToolDetail(event.tool, `${event.summary || '工具调用结果'}\n\n${detailBody}`);
           if (event.tool === 'run_command') {
             lastRunCommandDetail = `${event.summary || '命令执行'}\n\n${event.detail || ''}`.trim();
           }
-          if (event.tool === 'write_file') {
+          if (event.tool === 'write_file' || event.tool === 'patch_file') {
             sawWriteFileSuccess = true;
             scheduleWorkspaceRefresh(300);
           }
+        } else if (event.type === 'skill') {
+          appendSkillEvent(event);
         } else if (event.type === 'result') {
           finalResult = event.result as PreviewResult;
           setAgentStatus('idle');
@@ -1851,6 +1890,11 @@ async function streamChat(prompt: string) {
           lastConfirmRequest = { confirmId: event.confirmId, question: event.question, options: event.options };
           renderWaitingUserPanel();
           renderConfirmCard(event);
+        } else if (event.type === 'command_confirm_request') {
+          setAgentStatus('waiting_confirm');
+          setTaskPhase('waiting_user', '等待命令确认');
+          hideCommandConfirmOverlay();
+          showCommandConfirmOverlay(event);
         }
       } catch {
         continue;
@@ -2150,9 +2194,69 @@ clearFailureBtn.addEventListener('click', () => {
   renderFailurePanel();
 });
 
-commandConfirmCloseBtn.addEventListener('click', () => {
+function hideCommandConfirmOverlay() {
   commandConfirmOverlay.classList.remove('visible');
   commandConfirmOverlay.setAttribute('aria-hidden', 'true');
+  lastCommandConfirmRequest = null;
+}
+
+function showCommandConfirmOverlay(event: {
+  confirmId: string;
+  command: string;
+  cwd: string;
+  risk: string;
+  reason: string;
+}) {
+  lastCommandConfirmRequest = event;
+  commandConfirmReason.textContent = event.reason;
+  commandConfirmRisk.textContent = `风险：${event.risk}`;
+  commandConfirmRisk.dataset.risk = event.risk;
+  commandConfirmCwd.textContent = `cwd: ${event.cwd}`;
+  commandConfirmText.textContent = event.command;
+  commandConfirmOverlay.classList.add('visible');
+  commandConfirmOverlay.setAttribute('aria-hidden', 'false');
+}
+
+async function submitCommandConfirm(decision: 'allow_once' | 'allow_whitelist' | 'deny') {
+  if (!lastCommandConfirmRequest) return;
+  const { confirmId } = lastCommandConfirmRequest;
+  try {
+    const res = await fetch('/api/agent/command-confirm', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ confirmId, decision }),
+    });
+    if (!res.ok) throw new Error('命令确认提交失败');
+    hideCommandConfirmOverlay();
+    if (decision === 'deny') {
+      showToast({ kind: 'info', title: '已拒绝', message: '命令未执行' });
+    } else {
+      setAgentStatus('running');
+      if (decision === 'allow_whitelist') {
+        showToast({
+          kind: 'info',
+          title: '已加入白名单',
+          message: '可在"白名单"页查看和管理。',
+          actionLabel: '打开白名单页',
+          onAction: () => { window.location.href = '/whitelist.html'; },
+        });
+      }
+      showToast({
+        kind: 'info',
+        title: '命令已允许',
+        message: '命令正在执行…',
+      });
+    }
+  } catch (error) {
+    showToast({ kind: 'error', title: '确认失败', message: (error as Error).message });
+  }
+}
+
+commandConfirmDenyBtn.addEventListener('click', () => submitCommandConfirm('deny'));
+commandConfirmOnceBtn.addEventListener('click', () => submitCommandConfirm('allow_once'));
+commandConfirmWhitelistBtn.addEventListener('click', () => submitCommandConfirm('allow_whitelist'));
+commandConfirmOverlay.addEventListener('click', (e) => {
+  if (e.target === commandConfirmOverlay) void submitCommandConfirm('deny');
 });
 
 newSessionBtn.addEventListener('click', createNewSession);
@@ -2187,82 +2291,42 @@ document.addEventListener('click', () => {
   hideSessionDropdown();
 });
 
-// ── 工具管理 ──
-const toolManagement = document.querySelector<HTMLElement>('#toolManagement')!;
-const toolList = document.querySelector<HTMLElement>('#toolList')!;
-const toolStatus = document.querySelector<HTMLElement>('#toolStatus')!;
-const refreshToolsBtnEl = document.querySelector<HTMLButtonElement>('#refreshToolsBtn')!;
 
-let toolCache: ToolInfo[] = [];
-
-async function loadTools() {
-  try {
-    const res = await fetch('/api/tools');
-    const data = await res.json() as { tools?: ToolInfo[] };
-    toolCache = data.tools ?? [];
-    toolStatus.textContent = `${toolCache.length} 个工具`;
-    renderToolCards();
-  } catch {
-    toolStatus.textContent = '加载失败';
-    toolList.innerHTML = '<div class="version-empty">工具列表加载失败</div>';
-  }
-}
-
-function renderToolCards() {
-  toolList.innerHTML = '';
-  if (toolCache.length === 0) {
-    toolList.innerHTML = '<div class="version-empty">暂无工具</div>';
+// ── 项目知识入口(主页保留:任务跑完后一键把经验加入项目知识)──
+async function appendLastTaskMemory() {
+  if (!lastProjectMemoryEntry) {
+    showToast({ kind: 'warn', title: '暂无可保存经验', message: '完成一次任务后再保存到项目知识。' });
     return;
   }
-  toolCache.forEach((tool) => {
-    const card = document.createElement('div');
-    card.className = 'tool-item';
-    const successRate = tool.callCount > 0 ? Math.round((tool.successCount / tool.callCount) * 100) : 0;
-    card.innerHTML = `
-      <div class="tool-item-header">
-        <span class="tool-item-name">${tool.name}</span>
-        <span class="tool-item-source ${tool.source}">${tool.source === 'local' ? '内置' : '外部'}</span>
-      </div>
-      <div class="tool-item-desc">${tool.description}</div>
-      <div class="tool-item-stats">
-        <span>调用 ${tool.callCount} 次</span>
-        <span>成功率 ${successRate}%</span>
-        <span>平均 ${tool.avgDurationMs}ms</span>
-      </div>
-      <div class="tool-toggle" data-tool="${tool.name}">
-        <span>${tool.enabled ? '已启用' : '已禁用'}</span>
-        <div class="tool-toggle-switch${tool.enabled ? ' on' : ''}"></div>
-      </div>
-    `;
-
-    const toggle = card.querySelector<HTMLElement>('.tool-toggle')!;
-    toggle.addEventListener('click', () => toggleToolEnabled(tool.name, !tool.enabled));
-
-    toolList.appendChild(card);
-  });
+  try {
+    appendLastTaskMemoryBtn.disabled = true;
+    const res = await fetch('/api/project-memory/append', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ section: 'Agent 任务经验', entry: lastProjectMemoryEntry }),
+    });
+    if (!res.ok) throw new Error('任务经验保存失败');
+    showToast({
+      kind: 'info',
+      title: '任务经验已保存',
+      message: '已写入 project-memory.md',
+      actionLabel: '打开项目知识',
+      onAction: () => { window.location.href = '/project-memory.html'; },
+    });
+  } catch (error) {
+    appendLastTaskMemoryBtn.disabled = false;
+    showToast({ kind: 'error', title: '保存任务经验失败', message: (error as Error).message });
+  }
 }
 
-async function toggleToolEnabled(toolName: string, enabled: boolean) {
-  const res = await fetch(`/api/tools/${encodeURIComponent(toolName)}`, {
-    method: 'PATCH',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ enabled }),
-  });
-  if (!res.ok) { showToast({ kind: 'error', title: '操作失败', message: '无法更新工具状态' }); return; }
-  const tool = toolCache.find((t) => t.name === toolName);
-  if (tool) tool.enabled = enabled;
-  renderToolCards();
-}
-
-refreshToolsBtnEl.addEventListener('click', loadTools);
+appendLastTaskMemoryBtn.addEventListener('click', appendLastTaskMemory);
+appendLastTaskMemoryBtn.disabled = true;
 
 loadLayoutState();
 applyLayoutWidths();
 initResizers();
 loadExpandedFolders();
 loadWorkspace();
-loadVersions();
-loadTools();
 
 // 添加模板生成按钮到新建菜单
 const newItemMenuElement = newItemMenu;
